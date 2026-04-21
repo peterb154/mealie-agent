@@ -49,6 +49,34 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(lines)
 
     @tool
+    def meal_plan_history(days_back: int = 30, start_date: str = "") -> str:
+        """What the household has cooked / planned in the recent past.
+        Use this BEFORE recommending meals so you don't suggest something
+        they just ate.
+
+        Args:
+            days_back: How many days of history to scan (default 30).
+            start_date: ISO date to walk back from. Defaults to today.
+        """
+        end = _parse_iso_date(start_date) if start_date else _date.today()
+        start = end - timedelta(days=days_back)
+        try:
+            items = user_client.list_meal_plans(start=start.isoformat(), end=end.isoformat())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("meal_plan_history failed")
+            return f"(fetch error: {exc})"
+        if not items:
+            return f"No meal-plan entries between {start} and {end}."
+        # Most-recent first so the agent sees this-week before last-month.
+        items.sort(key=lambda it: it.get("date", ""), reverse=True)
+        lines: list[str] = []
+        for it in items:
+            title = it.get("title") or (it.get("recipe") or {}).get("name") or "?"
+            etype = it.get("entryType", "meal")
+            lines.append(f"- {it['date']}  {etype}: {title}")
+        return "\n".join(lines)
+
+    @tool
     def add_to_meal_plan(
         date: str,
         entry_type: str = "dinner",
@@ -84,4 +112,4 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
             return f"(add failed: {exc})"
         return f"Scheduled: {date} {entry_type} — {title or recipe_slug} (id={result.get('id')})"
 
-    return [list_meal_plan, add_to_meal_plan]
+    return [list_meal_plan, meal_plan_history, add_to_meal_plan]

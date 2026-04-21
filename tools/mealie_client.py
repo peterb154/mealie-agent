@@ -84,6 +84,32 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def top_rated_recipes(
+        self,
+        *,
+        tag_name: str | None = None,
+        cookbook_slug: str | None = None,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Recipes ordered by rating (desc). Optional tag / cookbook filter."""
+        params: dict[str, Any] = {
+            "perPage": per_page,
+            "page": 1,
+            "orderBy": "rating",
+            "orderDirection": "desc",
+        }
+        if cookbook_slug:
+            cb = self._client.get(f"/api/households/cookbooks/{cookbook_slug}")
+            cb.raise_for_status()
+            qf = (cb.json() or {}).get("queryFilterString")
+            if qf:
+                params["queryFilter"] = qf
+        elif tag_name:
+            params["queryFilter"] = f'tags.name CONTAINS ALL ["{tag_name}"]'
+        r = self._client.get("/api/recipes", params=params)
+        r.raise_for_status()
+        return r.json()
+
     def search_recipes_text(
         self,
         query: str,

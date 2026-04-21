@@ -36,7 +36,9 @@ log = logging.getLogger("sync_recipes")
 
 
 def _snippet_for(r: dict) -> str:
-    """Text we actually embed. Name, tags, description, ingredient names."""
+    """Text we actually embed. Name, tags, description, ingredient names,
+    and a rating hint so semantic queries like 'favorite' or 'top rated'
+    have something to latch onto."""
     parts: list[str] = [r.get("name") or ""]
     if desc := r.get("description"):
         parts.append(desc)
@@ -53,6 +55,12 @@ def _snippet_for(r: dict) -> str:
     ings = [i for i in ings if i]
     if ings:
         parts.append("ingredients: " + ", ".join(ings))
+    rating = r.get("rating")
+    if isinstance(rating, (int, float)) and rating > 0:
+        # Plain-english descriptor helps embeddings; the numeric column
+        # handles structured filters/sorts.
+        label = "favorite" if rating >= 4.5 else "highly rated" if rating >= 4 else "rated"
+        parts.append(f"{label} ({rating}/5)")
     return "\n".join(p for p in parts if p)[:2000]
 
 
@@ -60,13 +68,16 @@ def _upsert(cur: psycopg.Cursor, row: dict) -> None:
     cur.execute(
         """
         INSERT INTO recipe_embeddings
-            (mealie_recipe_id, slug, name, snippet, embedding, source_updated_at, synced_at)
-        VALUES (%(id)s, %(slug)s, %(name)s, %(snippet)s, %(embedding)s, %(updated)s, now())
+            (mealie_recipe_id, slug, name, snippet, embedding, rating,
+             source_updated_at, synced_at)
+        VALUES (%(id)s, %(slug)s, %(name)s, %(snippet)s, %(embedding)s,
+                %(rating)s, %(updated)s, now())
         ON CONFLICT (mealie_recipe_id) DO UPDATE SET
             slug = EXCLUDED.slug,
             name = EXCLUDED.name,
             snippet = EXCLUDED.snippet,
             embedding = EXCLUDED.embedding,
+            rating = EXCLUDED.rating,
             source_updated_at = EXCLUDED.source_updated_at,
             synced_at = now()
         """,
@@ -145,6 +156,7 @@ def main() -> int:
                 "name": full.get("name") or slug,
                 "snippet": snippet,
                 "embedding": vec,
+                "rating": full.get("rating"),
                 "updated": full.get("dateUpdated"),
             }
             with conn.cursor() as cur:

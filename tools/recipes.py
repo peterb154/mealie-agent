@@ -78,7 +78,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         with pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT slug, name, snippet
+                SELECT slug, name, snippet, rating
                 FROM recipe_embeddings
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
@@ -91,12 +91,13 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         # Tool output is markdown the agent can quote verbatim. Full URL on
         # each entry so the agent's response is clickable even if the model
         # forgets the base URL.
-        lines = [
-            f"- **[{name}]({_recipe_url(slug)})** — {snippet[:120].strip()}  \n"
-            f"  `slug: {slug}`"
-            for slug, name, snippet in rows
-        ]
-        return "\n".join(lines)
+        def _fmt(slug: str, name: str, snippet: str, rating: float | None) -> str:
+            star = f" ⭐ {rating}/5" if rating and rating > 0 else ""
+            return (
+                f"- **[{name}]({_recipe_url(slug)})**{star} — "
+                f"{snippet[:120].strip()}  \n  `slug: {slug}`"
+            )
+        return "\n".join(_fmt(s, n, sn, r) for s, n, sn, r in rows)
 
     @tool
     def search_recipes_text(query: str, tag_name: str = "", cookbook_slug: str = "") -> str:
@@ -121,9 +122,41 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         items = body.get("items") or []
         if not items:
             return "No matches."
+        def _fmt(it: dict[str, Any]) -> str:
+            r = it.get("rating")
+            star = f" ⭐ {r}/5" if isinstance(r, (int, float)) and r > 0 else ""
+            return (
+                f"- **[{it['name']}]({_recipe_url(it['slug'])})**{star}  \n"
+                f"  `slug: {it['slug']}`"
+            )
+        return "\n".join(_fmt(it) for it in items[:15])
+
+    @tool
+    def top_rated_recipes(limit: int = 10, tag_name: str = "", cookbook_slug: str = "") -> str:
+        """Recipes ranked highest by the family. Use this when the user
+        asks for 'favorites', 'top rated', 'what we liked', etc.
+
+        Args:
+            limit: Maximum number of recipes to return (default 10).
+            tag_name: Optional tag filter (e.g., 'Maryjean').
+            cookbook_slug: Optional cookbook slug; use list_cookbooks first.
+        """
+        try:
+            body = user_client.top_rated_recipes(
+                tag_name=tag_name or None,
+                cookbook_slug=cookbook_slug or None,
+                per_page=limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("top_rated_recipes failed")
+            return f"(search error: {exc})"
+        items = [it for it in (body.get("items") or []) if (it.get("rating") or 0) > 0]
+        if not items:
+            return "No rated recipes found. Has anyone rated recipes in Mealie yet?"
         lines = [
-            f"- **[{it['name']}]({_recipe_url(it['slug'])})**  \n  `slug: {it['slug']}`"
-            for it in items[:15]
+            f"- **[{it['name']}]({_recipe_url(it['slug'])})** — ⭐ {it['rating']}/5  \n"
+            f"  `slug: {it['slug']}`"
+            for it in items
         ]
         return "\n".join(lines)
 
