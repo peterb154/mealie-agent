@@ -63,9 +63,9 @@
         const btn = document.createElement("button");
         btn.id = BTN_ID;
         btn.type = "button";
-        btn.textContent = "🍳 Meal Assistant";
-        btn.title = "Open Meal Assistant (opens in a new tab)";
-        btn.setAttribute("aria-label", "Open Meal Assistant");
+        btn.textContent = "🧑‍🍳 Chat with Chef Rex";
+        btn.title = "Chat with Chef Rex (opens in a new tab)";
+        btn.setAttribute("aria-label", "Chat with Chef Rex");
         Object.assign(btn.style, {
             position: "fixed",
             bottom: "1.25rem",
