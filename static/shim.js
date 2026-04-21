@@ -111,20 +111,51 @@
     function attachBodyObserver() {
         if (!document.body) return;
         if (bodyObs) bodyObs.disconnect();
-        bodyObs = new MutationObserver(() => ensureBtn());
-        bodyObs.observe(document.body, { childList: true, subtree: false });
+        bodyObs = new MutationObserver((muts) => {
+            ensureBtn();
+            // Retarget any newly-added links in whichever subtree mutated.
+            for (const m of muts) {
+                for (const n of m.addedNodes) {
+                    if (n.nodeType === 1) retargetExternalLinks(n);
+                }
+            }
+        });
+        // subtree:true so dynamically-added shopping items get caught.
+        bodyObs.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // Mealie auto-linkifies URLs in shopping-list notes but doesn't set
+    // target=_blank, so clicking a grocery-search link navigates away
+    // from the list. Sweep the DOM for <a href> pointing at a different
+    // origin and rewrite them in place. Cheap and idempotent.
+    function retargetExternalLinks(root) {
+        const r = root || document.body;
+        if (!r || !r.querySelectorAll) return;
+        for (const a of r.querySelectorAll("a[href]")) {
+            if (a.dataset.mealAgentRetargeted) continue;
+            const href = a.getAttribute("href") || "";
+            if (!/^https?:\/\//i.test(href)) continue;
+            try {
+                if (new URL(href).host === location.host) continue;
+            } catch { continue; }
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+            a.dataset.mealAgentRetargeted = "1";
+        }
     }
 
     function startAll() {
         ensureBtn();
+        retargetExternalLinks();
         attachBodyObserver();
         if (document.documentElement) {
             new MutationObserver(() => {
                 ensureBtn();
+                retargetExternalLinks();
                 attachBodyObserver();   // <body> may have been replaced
             }).observe(document.documentElement, { childList: true, subtree: false });
         }
-        setInterval(ensureBtn, 2000);
+        setInterval(() => { ensureBtn(); retargetExternalLinks(); }, 2000);
     }
 
     if (document.readyState === "loading") {

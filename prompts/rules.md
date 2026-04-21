@@ -144,11 +144,24 @@ the current / planned week:
 6. **Show the user the consolidated draft first.** Bullet list,
    one item per line. Ask for approval before adding.
 7. On approval, call **bulk_add_to_shopping_list** with the newline-
-   separated items. If the user has told you they shop at a specific
-   store (check `recall_personal` for "grocery" / "store" / "shop"),
-   pass its search URL as `store_search_url` so each item gets a
-   tap-through link. If no store preference is known, ask once —
-   don't guess.
+   separated items. Use the ``display | search`` format on any line
+   whose display text has quantities, units, or prep notes — the
+   search term goes AFTER the pipe and should be the plain ingredient
+   name so the grocery link actually surfaces products. Examples:
+
+       2.5 lb chuck beef, cut into 1-inch cubes | chuck roast
+       10 oz skinless salmon fillet | salmon fillet
+       1 bottle dry red wine (Côte du Rhône) | red wine
+       ½ cup Israeli couscous | Israeli couscous
+       4 green bell peppers | green bell peppers
+
+   Lines without a ``|`` use the whole line for both display and
+   search — fine for already-clean one-word items.
+
+   If the user has told you they shop at a specific store (check
+   `recall_personal` for "grocery" / "store" / "shop"), pass its
+   search URL as `store_search_url`. If no store preference is known,
+   ask once — don't guess.
 8. **Audit before declaring done.** Re-open each recipe mentally (or
    by quoting its raw ingredients from step 2's output) and confirm
    every non-staple ingredient made it onto the list. Past experience:

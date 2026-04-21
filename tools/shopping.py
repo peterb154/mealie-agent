@@ -30,6 +30,17 @@ def _grocery_link(item: str, url_template: str) -> str:
     return f"{item} — {url_template.format(q=q)}"
 
 
+def _build_note(display: str, search: str, url_template: str) -> str:
+    """Compose a shopping-list note: display text + (if a store URL
+    template is set) a trailing search link keyed on the cleaner
+    `search` term. Used by bulk_add_to_shopping_list."""
+    display = display.strip()
+    if not url_template:
+        return display
+    q = urllib.parse.quote_plus((search or display).strip())
+    return f"{display} — {url_template.format(q=q)}"
+
+
 def shopping_tools(user_client: MealieClient) -> list[Any]:
     """Per-request shopping-list tools bound to the user's JWT."""
 
@@ -96,35 +107,52 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
         Args:
             list_id: Target shopping-list UUID (from list_shopping_lists).
             items: Newline-separated items, one per line. Blank lines
-                and lines starting with '#' are ignored (handy for
-                letting the agent include section headers in its draft).
+                and lines starting with '#' are ignored (section headers
+                in drafts are fine). Two formats accepted per line:
+
+                  ``2.5 lb chuck beef``
+                    — the whole string becomes BOTH the display text AND
+                    the grocery-search query. Fine for simple ingredients.
+
+                  ``2.5 lb chuck beef | chuck roast``
+                    — display text BEFORE the pipe, clean search query
+                    AFTER. Use this when the display has quantities,
+                    units, or prep notes ('diced', '1-inch cubes')
+                    that would pollute a grocery-store search. Stripping
+                    those down to the ingredient name makes the link
+                    actually useful.
+
             store_search_url: Optional URL template for appending a
                 grocery-search link to each item. Use ``{q}`` as the
                 query placeholder (e.g.,
-                ``https://www.hy-vee.com/grocery/search?q={q}``). Leave
-                empty for plain-text notes. The agent should recall the
-                user's preferred store from personal memory and pass it
-                here; otherwise falls back to the GROCERY_SEARCH_URL env
-                default if one is set.
+                ``https://www.hy-vee.com/grocery/search?q={q}``). Empty
+                = plain notes. Recall the user's store from
+                ``recall_personal`` and pass it here; falls back to the
+                ``GROCERY_SEARCH_URL`` env default if one is configured.
         """
         url_template = store_search_url or _DEFAULT_STORE_URL
-        lines = [
-            ln.strip()
-            for ln in items.splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
-        if not lines:
+        parsed: list[tuple[str, str]] = []
+        for raw in items.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "|" in line:
+                display, search = (s.strip() for s in line.split("|", 1))
+            else:
+                display, search = line, line
+            parsed.append((display, search or display))
+        if not parsed:
             return "(no items — nothing to add)"
         added: list[str] = []
         failed: list[tuple[str, str]] = []
-        for line in lines:
-            note = _grocery_link(line, url_template)
+        for display, search in parsed:
+            note = _build_note(display, search, url_template)
             try:
-                user_client.add_to_shopping_list(list_id=list_id, note=note, quantity=1.0)
-                added.append(line)
+                user_client.add_to_shopping_list(list_id=list_id, note=note, quantity=0.0)
+                added.append(display)
             except Exception as exc:  # noqa: BLE001
-                logger.exception("bulk_add: %s failed", line)
-                failed.append((line, str(exc)))
+                logger.exception("bulk_add: %s failed", display)
+                failed.append((display, str(exc)))
         out = [f"Added {len(added)} item(s) to the list."]
         if failed:
             out.append(f"\n{len(failed)} failed:")
