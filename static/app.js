@@ -1,11 +1,13 @@
-// Tiny chat client: reads the Mealie JWT from localStorage (populated by
-// the host page / bookmarklet), posts to /chat/stream, renders SSE events.
+// Tiny chat client: reads the Mealie JWT, posts to /chat/stream, renders
+// SSE events.
 //
-// Mealie stores the session JWT in localStorage under `mealie.auth.token`
-// when the user logs in via its Nuxt frontend. If this page is served on
-// the same registerable domain (e.g. recipes.epetersons.com → chat-mealie),
-// the cookie path makes it visible; if not, the user pastes the token or
-// we fall back to a URL-fragment handoff (#token=...).
+// Mealie v3 is stateless JWT in localStorage (key: `mealie.access_token`)
+// — no cookies. localStorage is origin-scoped, so recipes.epetersons.com
+// and mealie-agent.epetersons.com CANNOT share it directly. Handoff is
+// via URL fragment: a Mealie-side link (or bookmarklet) sends the user
+// to `https://mealie-agent.epetersons.com/#token=<jwt>`, we stash the
+// token in our own localStorage under `mealieAgentToken`, strip the
+// fragment, and use it on every request.
 
 const logEl = document.getElementById("log");
 const formEl = document.getElementById("form");
@@ -27,8 +29,10 @@ function getToken() {
     // 2. Previously stored.
     const stored = localStorage.getItem("mealieAgentToken");
     if (stored) return stored;
-    // 3. Mealie's own localStorage key (when same-origin).
-    const mealie = localStorage.getItem("mealie.auth.token");
+    // 3. Mealie's own localStorage key — only visible when same-origin.
+    //    (Present if this page is served under recipes.epetersons.com/chat
+    //    instead of a separate subdomain.)
+    const mealie = localStorage.getItem("mealie.access_token");
     if (mealie) return mealie;
     return null;
 }
@@ -119,7 +123,9 @@ formEl.addEventListener("submit", async (e) => {
     if (!token) {
         append(
             "err",
-            "No Mealie token found. Log in to Mealie first, or open this page via a #token=... link."
+            "No token. Get one from Mealie: log in to recipes.epetersons.com, " +
+            "run `localStorage.mealie.access_token` in the browser console, " +
+            "then open this page as `#token=<that-jwt>`."
         );
         return;
     }

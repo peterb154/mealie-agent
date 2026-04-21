@@ -1,0 +1,13 @@
+[Unit]
+Description=Incremental pull of Mealie recipes into mealie-agent's local pgvector mirror
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mealie-agent
+ExecStart=/usr/bin/docker compose exec -T agent python /app/scripts/sync_recipes.py
+StandardOutput=journal
+StandardError=journal
+# Bounded: sync_recipes.py exits when there's nothing new to pull.
+TimeoutStartSec=30min

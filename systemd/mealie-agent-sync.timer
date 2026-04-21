@@ -1,0 +1,12 @@
+[Unit]
+Description=Run mealie-agent recipe sync every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=mealie-agent-sync.service
+# Persistent=true so a missed run after downtime fires on next boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target
