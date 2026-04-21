@@ -2,6 +2,7 @@
 # ./strands_pg and imports from these. Pin stricter if you want — this
 # whole file is yours to edit.
 strands-agents>=1.13.0
+strands-agents-tools>=0.1
 psycopg[binary,pool]>=3.2
 pgvector>=0.3
 fastapi>=0.115

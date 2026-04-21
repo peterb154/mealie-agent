@@ -9,6 +9,7 @@ from typing import Any
 
 from strands import Agent
 from strands.models.bedrock import BedrockModel
+from strands_tools import current_time
 
 from strands_pg import (
     PgPromptStore,
@@ -68,6 +69,7 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
         model=BedrockModel(model_id=MODEL_ID),
         system_prompt=_system_prompt_for(context),
         tools=[
+            current_time,
             *recipe_tools(user_client),
             *mealplan_tools(user_client),
             *shopping_tools(user_client),
