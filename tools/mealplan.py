@@ -51,15 +51,18 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
     @tool
     def add_to_meal_plan(
         date: str,
-        entry_type: str,
+        entry_type: str = "dinner",
         recipe_slug: str = "",
         title: str = "",
     ) -> str:
-        """Schedule a recipe (or free-text meal) on a date.
+        """Schedule a recipe (or free-text meal) on a date. Defaults to dinner.
 
         Args:
-            date: ISO date (YYYY-MM-DD) to schedule the meal on.
+            date: ISO date (YYYY-MM-DD) to schedule the meal on. Resolve
+                relative dates like 'tonight' with current_time first.
             entry_type: One of 'breakfast', 'lunch', 'dinner', 'side'.
+                Defaults to 'dinner' — only pass something else when the
+                user explicitly asks for another meal.
             recipe_slug: Mealie recipe slug. Omit for a free-text entry.
             title: Free-text title (used when recipe_slug is empty).
         """

@@ -35,6 +35,13 @@ Recipe discovery — two complementary tools, pick the right one:
   Semantic search tends to miss these. Also use this when the user
   scopes to a cookbook or tag — pass `tag_name` or `cookbook_slug`.
 
+Meal planning defaults:
+
+- Unless the user explicitly says "breakfast", "lunch", or "side",
+  assume they mean **dinner**. Don't ask "what type of entry" — just
+  schedule it as dinner and say so in your confirmation. Only ask if
+  the user uses words like "for lunch tomorrow" that point elsewhere.
+
 Cookbook awareness:
 
 - **list_cookbooks()** — when the user mentions a cookbook by name
