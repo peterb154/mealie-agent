@@ -252,7 +252,16 @@ def make_app(
             )
 
         return EventSourceResponse(
-            _stream_agent(get_agent, session_id, req.message, context)
+            _stream_agent(get_agent, session_id, req.message, context),
+            headers={
+                # nginx (incl. NPM) buffers proxied responses by default,
+                # which breaks SSE — events queue up until the buffer fills
+                # or the connection closes. This tells nginx to stream.
+                "X-Accel-Buffering": "no",
+                # Some CDNs/proxies gzip text/* responses; a partial gzip
+                # block never flushes. Opt out explicitly.
+                "Cache-Control": "no-cache, no-transform",
+            },
         )
 
     if prompt_store is not None:
