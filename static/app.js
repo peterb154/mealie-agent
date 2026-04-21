@@ -123,16 +123,7 @@ async function send(message, token) {
     inputEl.focus();
 }
 
-// Enter submits; Shift+Enter inserts a newline.
-inputEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        formEl.requestSubmit();
-    }
-});
-
-formEl.addEventListener("submit", async (e) => {
-    e.preventDefault();
+async function doSend() {
     const msg = inputEl.value.trim();
     if (!msg) return;
     const token = getToken();
@@ -147,6 +138,21 @@ formEl.addEventListener("submit", async (e) => {
     }
     inputEl.value = "";
     await send(msg, token);
+}
+
+// Enter submits; Shift+Enter inserts a newline. Bypass HTML5 form
+// validation by calling doSend directly — the textarea's `required`
+// attribute would otherwise short-circuit requestSubmit() silently.
+inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        doSend();
+    }
+});
+
+formEl.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await doSend();
 });
 
 const t = getToken();
