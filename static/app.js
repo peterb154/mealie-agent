@@ -86,7 +86,10 @@ async function send(message, token) {
     // the whole buffer as HTML on each update. Streaming a partial markdown
     // document through marked is resilient — unclosed tokens render as
     // plain text until the closer arrives.
-    const agentMsg = append("agent markdown", "");
+    //
+    // Both are reassigned after each tool call so the next text chunk lives
+    // in a fresh bubble (see tool_use branch below).
+    let agentMsg = append("agent markdown", "");
     let markdownBuf = "";
 
     // sse-starlette over fetch + ReadableStream — EventSource doesn't allow
@@ -133,13 +136,31 @@ async function send(message, token) {
             }
             const data = dataParts.join("\n");
             if (event === "text") {
+                // After a tool call, start a fresh agent bubble + buffer so
+                // post-tool text doesn't fuse with pre-tool text visually.
+                if (!agentMsg) {
+                    agentMsg = append("agent markdown", "");
+                    markdownBuf = "";
+                }
                 markdownBuf += data;
-                agentMsg.innerHTML = marked.parse(markdownBuf);
+                try {
+                    agentMsg.innerHTML = marked.parse(markdownBuf);
+                } catch (err) {
+                    // Partial markdown (unclosed [, half a URL, etc.)
+                    // can trip marked mid-stream. Fall back to plain text
+                    // so the next chunk gets another shot — never let a
+                    // parse error halt the stream loop.
+                    console.warn("[chat] marked threw on partial buffer", err);
+                    agentMsg.textContent = markdownBuf;
+                }
                 logEl.scrollTop = logEl.scrollHeight;
             } else if (event === "thinking") {
                 append("think", data);
             } else if (event === "tool_use") {
                 append("tool", `🔧 ${data}`);
+                // Any following text starts a new bubble.
+                agentMsg = null;
+                markdownBuf = "";
             } else if (event === "error") {
                 append("err", data);
             } else if (event === "done") {
