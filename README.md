@@ -1,175 +1,148 @@
-# my-agent
+# mealie-agent — Chef Rex
 
-A strands-pg agent. Stamped from
-[strands-pgsql-agent-framework](https://github.com/peterb154/strands-pgsql-agent-framework)
-— you own every file in this directory.
+Per-user meal-planning assistant for the Petersons family Mealie library.
+Lives alongside Mealie at `recipes.epetersons.com` and is reachable at
+[`mealie-agent.epetersons.com`](https://mealie-agent.epetersons.com).
+Built on [strands-pg](https://github.com/peterb154/strands-pgsql-agent-framework).
 
-## Quickstart
+## What he does
+
+- **Recipe discovery** over 5,400+ recipes — semantic search for mood
+  queries ("quick chicken dinner"), lexical search for proper nouns
+  ("Mary Jean's funeral meatballs"), cookbook-aware (cookbooks are
+  saved tag filters in Mealie).
+- **Favorites + ratings** — pulls the signed-in user's personal
+  ratings from `/api/users/self/ratings` and surfaces them as ⭐ 4-5
+  hits when planning.
+- **Meal planning** — sees recent history so he doesn't repeat what
+  you just cooked, alternates household vs. personal preferences if
+  that's your pattern, defaults to dinner unless told otherwise.
+- **Shopping lists** — walks the meal plan, extracts ingredients from
+  every scheduled recipe, consolidates across meals, scales by
+  headcount (chicken by total weight etc.), drops pantry staples,
+  attaches each item's source recipe(s) and a grocery-store search
+  link. Per-user store preference captured during onboarding.
+- **Memory** — multi-scope via strands-pg's `memory_tools(namespaces=...)`.
+  Personal (`user:<email>`) and household (`household:<id>`) are
+  namespaced separately so allergies vs. "we do veggie Tuesdays" don't
+  bleed together.
+- **Onboarding** — first time a user talks to Rex, `recall_personal`
+  returns nothing so he runs a single short questionnaire (diet, cook
+  time, household, preferred store) and saves the answers before
+  diving into the actual request.
+
+## Deployment topology
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ recipes.epetersons.com  (Mealie, CT 100, 192.168.0.6)      │
+│   ├── NPM injects <script src=mealie-agent/static/shim.js>  │
+│   │   (proxy_host/9.conf has a patched Accept-Encoding to   │
+│   │    let sub_filter work — see local_network/npm/)        │
+│   └── shim renders a 🧑‍🍳 "Chat with Chef Rex" pill in the  │
+│       corner of every page. Click → open a new tab with     │
+│       the user's JWT handed off via URL fragment.           │
+│                                                             │
+│ mealie-agent.epetersons.com  (this agent, CT 114,           │
+│                               192.168.0.24)                 │
+│   ├── FastAPI `/chat` + `/chat/stream` (SSE)                │
+│   ├── auth_verifier introspects the fragment-handoff JWT    │
+│   │   against Mealie's /api/users/self                      │
+│   ├── Local Postgres mirror of 5,400+ recipes (pgvector)    │
+│   └── systemd timer: incremental recipe sync every 10 min   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Public DNS: both subdomains CNAME to `home.epetersons.com`. NPM
+fronts everything; Cloudflare is not in this path.
+
+## Key design decisions
+
+- **`cache_agents=False`** — user JWTs rotate every 48h and contexts
+  differ per request, so we rebuild the agent each turn. Construction
+  is cheap; Bedrock is the expensive part.
+- **Session_id comes from the verifier, not the request body** —
+  prevents spoofing.
+- **Ratings are per-user** — the recipe-level `rating` field on
+  Mealie's `/api/recipes/{id}` is always null; real data lives under
+  `/api/users/self/ratings`. `top_rated_recipes` joins that with the
+  recipe detail endpoint.
+- **Prompts on disk win on deploy** — `PgPromptStore.seed_from_dir`
+  respects file mtime; live API edits persist until the next deploy.
+- **`GIT_SHA` build-arg, not runtime** — `deploy.sh` exports the short
+  commit SHA before `docker compose up -d --build`. `/api/health`
+  reports it so n8n's deploy workflow can verify landings.
+
+## Tool registry (for the record)
+
+| Tool | Source | What it does |
+|---|---|---|
+| `current_time` | strands-agents-tools | Anchors "today" / "tonight" etc. |
+| `search_recipes` | tools/recipes.py | Semantic search (local pgvector) |
+| `search_recipes_text` | tools/recipes.py | Mealie lexical search + tag/cookbook filter |
+| `top_rated_recipes` | tools/recipes.py | User's ⭐ 4+ / favorites |
+| `list_cookbooks` | tools/recipes.py | Mealie cookbooks (saved filters) |
+| `get_recipe` | tools/recipes.py | Full recipe detail + URL |
+| `list_meal_plan` | tools/mealplan.py | Upcoming scheduled meals |
+| `meal_plan_history` | tools/mealplan.py | Recent cooked meals (anti-repeat) |
+| `list_ingredients_for_meal_plan` | tools/mealplan.py | Flat ingredient dump for shopping-list build |
+| `add_to_meal_plan` | tools/mealplan.py | Schedule a recipe; defaults to dinner |
+| `delete_meal_plan_entry` | tools/mealplan.py | Fix duplicates |
+| `list_shopping_lists` | tools/shopping.py | Which lists exist |
+| `show_shopping_list` | tools/shopping.py | What's on a list |
+| `add_to_shopping_list` | tools/shopping.py | Single item |
+| `bulk_add_to_shopping_list` | tools/shopping.py | Many items, with grocery-search links |
+| `check_shopping_item` | tools/shopping.py | Mark bought / unbought |
+| `delete_shopping_item` | tools/shopping.py | Remove one |
+| `clear_shopping_list` | tools/shopping.py | Wipe list (all or checked-only) |
+| `remember_personal` / `recall_personal` | strands_pg.memory_tools | Per-user facts |
+| `remember_household` / `recall_household` | strands_pg.memory_tools | Shared household rules |
+
+## Deploying changes
+
+Push to `main` — n8n receives the webhook and calls
+`POST /api/deploy` on this agent. That writes `/opt/mealie-agent/.deploy-trigger`;
+the host's systemd `mealie-agent-deploy.path` unit fires
+`.service` which runs `deploy.sh` with `GIT_SHA` exported. A
+`docker compose up -d --build` rebuilds the image and restarts the
+container. Verify with `curl https://mealie-agent.epetersons.com/api/health`
+— the `commit` field should match the short SHA you pushed.
+
+Prompt-only changes (no code): push the `.md` file and redeploy. The
+on-disk file wins because its mtime is newer than the DB row.
+
+## Upgrading the strands-pg framework
 
 ```bash
-cp .env.example .env
-# edit AWS_PROFILE to one with Bedrock access (SSO-backed is fine)
-
-docker compose up --build
-# agent on :8000, Postgres on :5432 (internal)
-
-# in another shell:
-curl -s localhost:8000/health
-curl -s -X POST localhost:8000/chat \
-  -H 'content-type: application/json' \
-  -d '{"session_id":"you@example.com","message":"hello"}'
+bash <(curl -sSL https://raw.githubusercontent.com/peterb154/strands-pgsql-agent-framework/main/install.sh) \
+    . --refresh --ref v0.7.0
 ```
 
-## First time on a fresh host?
+`--refresh` only touches `strands_pg/` and the framework-numbered
+migrations (`001-099*.sql`). Your `app.py`, `tools/`, `prompts/`,
+`Dockerfile` are left alone.
 
-If you're deploying to a fresh Debian/Ubuntu LXC or VPS that doesn't yet have
-Docker installed, run `bootstrap-lxc.sh` first. It's idempotent — safe to
-re-run. Installs Docker + compose, sets log rotation, wires a systemd unit
-that auto-starts any `/opt/*/docker-compose.yml` stacks on reboot.
+## Troubleshooting
 
 ```bash
-# one-time, as root:
-bash bootstrap-lxc.sh
+# Agent container logs
+ssh root@192.168.0.24 'docker logs --tail 100 mealie-agent-agent-1'
+
+# Incremental sync timer
+ssh root@192.168.0.24 'systemctl list-timers mealie-agent-sync --no-pager'
+ssh root@192.168.0.24 'journalctl -u mealie-agent-sync.service --since "1 hour ago"'
+
+# Full recipe resync (takes ~22 min for 5k+ recipes)
+ssh root@192.168.0.24 'nohup docker compose -f /opt/mealie-agent/docker-compose.yml \
+  exec -T agent python /app/scripts/sync_recipes.py --full \
+  > /opt/mealie-agent/sync.log 2>&1 &'
 ```
 
-If your host already has Docker configured the way you want, skip this and
-go straight to Quickstart. The script is yours to edit — add host-level
-setup specific to your agent (tuning, extra packages, etc.) in place and
-commit it alongside the rest.
+NPM shim-injection gotcha (if the floating pill disappears): see
+[`local_network/npm/`](https://github.com/peterb154/local_network/tree/main/npm).
+The `--refresh` flag on upstream won't restore this — it's an NPM-side
+patch, run the idempotent script there.
 
-## What's here
+## License
 
-- **`app.py`** — where you build your Strands `Agent`. This is the main
-  extension point; read it top to bottom.
-- **`strands_pg/`** — vendored framework code. You own it. Bugfix upstream?
-  Patch it here, send a PR if you feel like it.
-- **`migrations/`** — framework migrations `001-099`, plus your own `100+`.
-  Applied in order on boot by `python -m strands_pg.migrate`.
-- **`tools/`** — where your domain tools go. Strands `@tool`-decorated
-  functions. Import them in `app.py` and add to `tools=[...]`.
-- **`prompts/`** — `soul.md` + `rules.md` get seeded into the DB on first
-  boot. Edit there or live via `PUT /prompts/{name}`.
-- **`Dockerfile`**, **`docker-compose.yml`**, **`entrypoint.sh`** — your
-  container stack. Edit freely.
-- **`db/Dockerfile`** — Postgres 17 + pgvector + PostGIS.
-
-## Adding a domain tool
-
-```python
-# tools/orders.py
-from strands import tool
-from strands_pg._pool import get_pool
-
-@tool
-def search_orders(customer: str) -> str:
-    """Look up orders for a given customer."""
-    with get_pool().connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, total FROM orders WHERE customer = %s", (customer,))
-        return "\n".join(f"#{r[0]}: ${r[1]}" for r in cur.fetchall())
-```
-
-```python
-# app.py
-from tools.orders import search_orders
-
-# in build_agent:
-tools=[search_orders, *memory_tools(namespace=session_id)],
-```
-
-## Adding a domain table
-
-Add `migrations/100_orders.sql` (framework uses 001-099, agents start at 100):
-
-```sql
-CREATE TABLE IF NOT EXISTS orders (
-    id       BIGSERIAL PRIMARY KEY,
-    customer TEXT NOT NULL,
-    total    NUMERIC NOT NULL,
-    ...
-);
-```
-
-`docker compose up --build` reapplies migrations on boot.
-
-## Deploying to production
-
-For a real deployment (Proxmox LXC, VPS, anything without your laptop's
-`~/.aws`), use a dedicated IAM user with least privilege. Don't reuse your
-admin credentials. Don't ship a profile-based config.
-
-### 1. IAM user + least-privilege policy
-
-Create a fresh IAM user named after this agent (e.g. `strands-pg-my-agent`)
-and attach a policy like this. Scope it narrowly — just the models you
-actually invoke, nothing else:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "InvokeClaudeAndTitan",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ],
-      "Resource": [
-        "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
-        "arn:aws:bedrock:us-east-1:<ACCOUNT_ID>:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      ]
-    }
-  ]
-}
-```
-
-Two notes:
-
-- `STRANDS_PG_MODEL_ID=us.anthropic...` is a Bedrock **inference profile**,
-  not a raw foundation model. Invoking it needs permissions on **both** the
-  profile ARN *and* the foundation-model ARNs the profile routes to. The
-  example above grants both. Leave out the FM ARNs and you'll get
-  `AccessDeniedException` at runtime.
-- Titan v2 embeddings go through the foundation-model ARN directly (no
-  inference profile). Keep that line even if you only chat with Claude.
-
-Generate an access key pair for the user. Save the secret somewhere safe —
-you can't view it again after this screen.
-
-### 2. Put the keys in `.env` on the host
-
-```bash
-STRANDS_PG_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxxxxxxxx
-AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### 3. Drop the `~/.aws` mount from `docker-compose.yml`
-
-The bind mount fails to start the container on a host that doesn't have
-`~/.aws`. Delete this block from the `agent` service:
-
-```yaml
-    volumes:
-      - ${HOME}/.aws:/root/.aws
-```
-
-### 4. Rotate
-
-Rotate the access key on a schedule — quarterly minimum. The IAM user
-has no other permissions, so the blast radius of a leak is limited to
-Bedrock usage on the specific models above (an attacker can burn your
-budget, not much else). Still, rotate.
-
-## Updating from upstream
-
-Re-run the installer into a scratch directory and `diff -r` against this one:
-
-```bash
-bash install.sh /tmp/fresh-stamp --ref v0.2.0
-diff -r /tmp/fresh-stamp .
-```
-
-Pick what you want, patch what you don't. The code is yours.
+MIT, same as the framework.
