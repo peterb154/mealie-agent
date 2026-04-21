@@ -91,8 +91,9 @@ async function send(message, token) {
     while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        buf += dec.decode(value, { stream: true });
-        // SSE frames are delimited by blank lines.
+        // Strip CRs so both \n\n and \r\n\r\n delimiters work. sse-starlette
+        // emits CRLF line endings; we treat either form as a frame separator.
+        buf += dec.decode(value, { stream: true }).replace(/\r/g, "");
         let idx;
         while ((idx = buf.indexOf("\n\n")) !== -1) {
             const frame = buf.slice(0, idx);
