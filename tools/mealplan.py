@@ -49,6 +49,73 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(lines)
 
     @tool
+    def list_ingredients_for_meal_plan(start_date: str = "", days: int = 7) -> str:
+        """Walk the meal plan in a date window, fetch each scheduled
+        recipe, and return a flat ingredient list — one ingredient per
+        line, prefixed with the source recipe so you can audit. Use this
+        to build a shopping list: LLM consolidates duplicates, scales
+        by headcount, drops pantry staples, THEN calls
+        bulk_add_to_shopping_list.
+
+        Args:
+            start_date: ISO date to start from. Defaults to today.
+            days: Number of days forward (default 7).
+        """
+        start = _parse_iso_date(start_date) if start_date else _date.today()
+        end = start + timedelta(days=days)
+        try:
+            items = user_client.list_meal_plans(start=start.isoformat(), end=end.isoformat())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("list_ingredients_for_meal_plan: meal_plans failed")
+            return f"(meal plan fetch error: {exc})"
+        if not items:
+            return f"No meal-plan entries between {start} and {end}."
+
+        # Deduplicate by slug so we don't double-process a recipe appearing
+        # on multiple days.
+        slugs: list[str] = []
+        seen: set[str] = set()
+        entries: dict[str, list[str]] = {}
+        for it in items:
+            recipe = it.get("recipe") or {}
+            slug = recipe.get("slug")
+            if not slug:
+                continue
+            name = recipe.get("name") or slug
+            label = f"{it.get('date')} {it.get('entryType', 'meal')}"
+            entries.setdefault(slug, []).append(label)
+            if slug not in seen:
+                seen.add(slug)
+                slugs.append(slug)
+
+        if not slugs:
+            return "No scheduled recipes (only free-text plan entries)."
+
+        lines: list[str] = []
+        for slug in slugs:
+            try:
+                r = user_client.get_recipe(slug)
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"## {slug}  (fetch failed: {exc})")
+                continue
+            name = r.get("name") or slug
+            dates = ", ".join(entries[slug])
+            lines.append(f"## {name}  _({dates})_")
+            yield_txt = r.get("recipeYield") or r.get("recipeServings") or "?"
+            lines.append(f"yield: {yield_txt}")
+            for ing in r.get("recipeIngredient") or []:
+                display = (
+                    ing.get("display")
+                    or ing.get("note")
+                    or (ing.get("food") or {}).get("name")
+                    or ""
+                ).strip()
+                if display:
+                    lines.append(f"- {display}")
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    @tool
     def meal_plan_history(days_back: int = 30, start_date: str = "") -> str:
         """What the household has cooked / planned in the recent past.
         Use this BEFORE recommending meals so you don't suggest something
@@ -112,4 +179,9 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
             return f"(add failed: {exc})"
         return f"Scheduled: {date} {entry_type} — {title or recipe_slug} (id={result.get('id')})"
 
-    return [list_meal_plan, meal_plan_history, add_to_meal_plan]
+    return [
+        list_meal_plan,
+        list_ingredients_for_meal_plan,
+        meal_plan_history,
+        add_to_meal_plan,
+    ]
