@@ -99,6 +99,55 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(lines)
 
     @tool
+    def search_recipes_text(query: str, tag_name: str = "", cookbook_slug: str = "") -> str:
+        """Keyword search over Mealie's recipe library. Use this when the
+        user gave a specific name, keyword, or phrase that semantic
+        embeddings might miss ("funeral meatballs", "tater tot casserole").
+
+        Args:
+            query: Literal words to search for in recipe names + text.
+            tag_name: Optional tag name (e.g., 'Maryjean'). Combines with query.
+            cookbook_slug: Optional cookbook slug (e.g., 'mary-jean-s-cookbook').
+                Filters results to that cookbook's saved query. Use
+                list_cookbooks to discover slugs.
+        """
+        try:
+            body = user_client.search_recipes_text(
+                query, tag_name=tag_name or None, cookbook_slug=cookbook_slug or None
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("search_recipes_text failed")
+            return f"(search error: {exc})"
+        items = body.get("items") or []
+        if not items:
+            return "No matches."
+        lines = [
+            f"- **[{it['name']}]({_recipe_url(it['slug'])})**  \n  `slug: {it['slug']}`"
+            for it in items[:15]
+        ]
+        return "\n".join(lines)
+
+    @tool
+    def list_cookbooks() -> str:
+        """List all cookbooks visible to the current user.
+
+        A Mealie 'cookbook' is a saved filter (e.g., all recipes with
+        tag X). Use this when the user mentions a cookbook by name so you
+        can pass its slug to search_recipes_text.
+        """
+        try:
+            items = user_client.list_cookbooks()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("list_cookbooks failed")
+            return f"(fetch error: {exc})"
+        if not items:
+            return "No cookbooks."
+        return "\n".join(
+            f"- **{cb['name']}** (slug: `{cb['slug']}`) — filter: `{cb.get('queryFilterString', '')}`"
+            for cb in items
+        )
+
+    @tool
     def get_recipe(slug: str) -> str:
         """Fetch full recipe detail by slug. Returns ingredients + steps.
 
@@ -132,4 +181,4 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
                 out.append(f"{i}. {s.get('text', '').strip()}")
         return "\n".join(out)
 
-    return [search_recipes, get_recipe]
+    return [search_recipes, search_recipes_text, list_cookbooks, get_recipe]

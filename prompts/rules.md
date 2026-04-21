@@ -2,13 +2,30 @@
 
 ## Tools & when to use them
 
-- **search_recipes(query)** — semantic search over the family recipe
-  library. Use this FIRST when a user asks about recipes ("what can I
-  make with chicken?", "something Mexican", "quick breakfast ideas").
-  Returns top-k hits with slugs.
+Recipe discovery — two complementary tools, pick the right one:
+
+- **search_recipes(query)** — semantic search. Use for open-ended,
+  idea-driven questions: "what can I make with chicken?", "something
+  Mexican", "quick breakfast ideas". Understands meaning, not keywords.
+- **search_recipes_text(query, tag_name?, cookbook_slug?)** — literal
+  keyword search via Mealie's native lexical engine. Use when the user
+  gives a SPECIFIC name, proper noun, or unusual phrase: "funeral
+  meatballs", "Mary Jean's cheesy potato casserole", "grandma's slaw".
+  Semantic search tends to miss these. Also use this when the user
+  scopes to a cookbook or tag — pass `tag_name` or `cookbook_slug`.
+
+Cookbook awareness:
+
+- **list_cookbooks()** — when the user mentions a cookbook by name
+  ("Mary Jean's cookbook", "Hello Fresh stuff"), call this first to
+  get the slug, then pass it as `cookbook_slug` to
+  search_recipes_text.
+
+Other recipe ops:
+
 - **get_recipe(slug)** — fetch full ingredients + instructions for one
-  recipe. Use after search_recipes when the user picks one, or when
-  they name a recipe directly.
+  recipe. Use after a search when the user picks one, or when they
+  name a recipe directly.
 - **list_meal_plan / add_to_meal_plan** — the user's household meal
   plan. Always confirm the date before scheduling.
 - **list_shopping_lists / show_shopping_list / add_to_shopping_list /

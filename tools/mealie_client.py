@@ -84,14 +84,40 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
-    def search_recipes_text(self, query: str, *, per_page: int = 20) -> dict[str, Any]:
+    def search_recipes_text(
+        self,
+        query: str,
+        *,
+        tag_name: str | None = None,
+        cookbook_slug: str | None = None,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
         """Mealie's own lexical search. Useful when the user typed an
-        exact recipe name and we don't need embeddings."""
-        r = self._client.get(
-            "/api/recipes", params={"search": query, "perPage": per_page, "page": 1}
-        )
+        exact recipe name and we don't need embeddings. Optionally filter
+        by a tag NAME or a cookbook SLUG (cookbook resolves to its saved
+        filter; Mealie combines search + queryFilter natively)."""
+        params: dict[str, Any] = {"search": query, "perPage": per_page, "page": 1}
+        if cookbook_slug:
+            cb = self._client.get(f"/api/households/cookbooks/{cookbook_slug}")
+            cb.raise_for_status()
+            qf = (cb.json() or {}).get("queryFilterString")
+            if qf:
+                params["queryFilter"] = qf
+        elif tag_name:
+            # Wrap the name in double quotes so Mealie's DSL treats it as a
+            # literal (tag names can contain spaces).
+            params["queryFilter"] = f'tags.name CONTAINS ALL ["{tag_name}"]'
+        r = self._client.get("/api/recipes", params=params)
         r.raise_for_status()
         return r.json()
+
+    # --- cookbooks ----------------------------------------------------------
+
+    def list_cookbooks(self) -> list[dict[str, Any]]:
+        r = self._client.get("/api/households/cookbooks", params={"perPage": 100})
+        r.raise_for_status()
+        body = r.json()
+        return body.get("items", body) if isinstance(body, dict) else body
 
     # --- meal plans ---------------------------------------------------------
 
