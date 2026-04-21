@@ -96,13 +96,31 @@ app = make_app(
 )
 
 # Static chat UI. Served at / (index.html) + /static/* for assets.
+from fastapi import Request  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from starlette.types import Scope  # noqa: E402
 
 _STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that tells the browser never to cache — avoids the
+    "I deployed but I still see old code" dance. These files are tiny
+    (a few KB); the round-trip cost is cheaper than a support request."""
+
+    async def get_response(self, path: str, scope: Scope):  # type: ignore[override]
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+
+app.mount("/static", _NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)
-def _index() -> FileResponse:
-    return FileResponse(str(_STATIC_DIR / "index.html"))
+def _index(request: Request) -> FileResponse:
+    return FileResponse(
+        str(_STATIC_DIR / "index.html"),
+        headers={"Cache-Control": "no-store"},
+    )
