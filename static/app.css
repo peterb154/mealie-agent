@@ -29,12 +29,24 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: -apple-system, system-ui, sans-serif;
   background: var(--bg);
   color: var(--fg);
   display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.chat {
+  width: min(48rem, 100%);
+  height: min(80vh, 44rem);
+  display: grid;
   grid-template-rows: auto 1fr auto;
-  min-height: 100vh;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.35);
 }
 header {
   padding: 0.75rem 1rem;
