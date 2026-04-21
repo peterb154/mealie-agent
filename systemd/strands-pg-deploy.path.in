@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch @AGENT@ deploy-trigger file
+
+[Path]
+PathModified=@DIR@/.deploy-trigger
+Unit=@AGENT@-deploy.service
+
+[Install]
+WantedBy=multi-user.target

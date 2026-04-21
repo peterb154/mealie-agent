@@ -1,0 +1,12 @@
+# Runtime deps for your agent. The vendored strands_pg package lives at
+# ./strands_pg and imports from these. Pin stricter if you want — this
+# whole file is yours to edit.
+strands-agents>=1.13.0
+psycopg[binary,pool]>=3.2
+pgvector>=0.3
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+httpx>=0.27
+sse-starlette>=2.1
+boto3>=1.35

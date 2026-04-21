@@ -1,0 +1,71 @@
+services:
+  db:
+    build:
+      context: ./db
+    environment:
+      POSTGRES_USER: strands
+      POSTGRES_PASSWORD: strands
+      POSTGRES_DB: strands
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strands -d strands"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      STRANDS_PG_DSN: postgresql://strands:strands@db:5432/strands
+    volumes:
+      # Only needed for Option A (AWS_PROFILE with SSO/SAML/STS creds).
+      # rw so boto3 can refresh SSO tokens into ~/.aws/sso/cache.
+      # If you're using static IAM user keys (Option B in .env.example),
+      # DELETE this volume block — the bind mount fails on hosts without
+      # ~/.aws (typical VPS / fresh LXC).
+      - ${HOME}/.aws:/root/.aws
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Uncomment if your agent has a browser tool (Playwright/CDP driving). Used
+  # for scraping or automating websites your domain tools need to reach.
+  # The agent talks to chromium over CDP at http://chromium:3000 — point your
+  # Playwright connect() at ws://chromium:3000 or http://chromium:3000 per
+  # browserless's docs. ~1.5GB image; skip this block if you don't need it.
+  # chromium:
+  #   image: browserless/chrome:latest
+  #   environment:
+  #     CONNECTION_TIMEOUT: "60000"
+  #     MAX_CONCURRENT_SESSIONS: "3"
+  #   shm_size: 2gb
+  #   restart: unless-stopped
+
+  # Uncomment to expose the domain schema as a REST API (PostgREST).
+  # Requires a role migration granting SELECT to web_anon on your tables;
+  # see https://github.com/peterb154/strands-pgsql-agent-framework for the
+  # pattern.
+  # postgrest:
+  #   image: postgrest/postgrest:v12.2.0
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     PGRST_DB_URI: postgres://strands:strands@db:5432/strands
+  #     PGRST_DB_SCHEMAS: api
+  #     PGRST_DB_EXTRA_SEARCH_PATH: "api, public"
+  #     PGRST_DB_ANON_ROLE: web_anon
+  #   ports:
+  #     - "3000:3000"
+  #   restart: unless-stopped
+
+volumes:
+  pgdata:

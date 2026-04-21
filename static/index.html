@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meal Assistant</title>
+  <link rel="icon" href="data:;base64,=" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header>
+    <h1>Meal Assistant</h1>
+    <div id="user"></div>
+  </header>
+
+  <main id="log" aria-live="polite"></main>
+
+  <form id="form">
+    <textarea id="input" rows="2" placeholder="Plan a meal, find a recipe, edit the shopping list..." required></textarea>
+    <button type="submit">Send</button>
+  </form>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

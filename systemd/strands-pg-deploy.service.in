@@ -1,0 +1,15 @@
+[Unit]
+Description=Pull @AGENT@ main + rebuild Docker Compose stack
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/deploy.sh
+StandardOutput=journal
+StandardError=journal
+# Triggered by @AGENT@-deploy.path on changes to @DIR@/.deploy-trigger.
+# Runs on the LXC host so `docker compose up -d --build` survives the
+# rebuild of the agent container (an in-container orchestrator would
+# get killed mid-command).
