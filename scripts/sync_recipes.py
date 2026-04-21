@@ -116,6 +116,17 @@ def main() -> int:
     log.info("connecting to %s", dsn.split("@")[-1])
 
     with MealieClient.from_env() as mc, psycopg.connect(dsn) as conn:
+        # Pull the service account's ratings up-front. Mealie stores ratings
+        # per-user (/api/users/self/ratings); the recipe-level `rating`
+        # field on /api/recipes/{id} is always null. Map by recipeId so the
+        # per-recipe loop can look them up in O(1).
+        ratings_by_id: dict[str, float] = {}
+        for row in mc.self_ratings():
+            rid, val = row.get("recipeId"), row.get("rating")
+            if rid and isinstance(val, (int, float)) and val > 0:
+                ratings_by_id[rid] = float(val)
+        log.info("loaded %d user ratings", len(ratings_by_id))
+
         # Figure out how much to sync.
         updated_after: str | None = None
         if not args.full:
@@ -144,6 +155,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 log.exception("get_recipe %s failed — skipping", slug)
                 continue
+            # Patch the recipe's rating from the user-rating map before
+            # snippet generation so the 'favorite'/'highly rated' token
+            # makes it into the embedding.
+            rid = full.get("id")
+            if rid and rid in ratings_by_id:
+                full["rating"] = ratings_by_id[rid]
             snippet = _snippet_for(full)
             try:
                 vec = embed(snippet)

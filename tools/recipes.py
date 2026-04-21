@@ -132,32 +132,49 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(_fmt(it) for it in items[:15])
 
     @tool
-    def top_rated_recipes(limit: int = 10, tag_name: str = "", cookbook_slug: str = "") -> str:
-        """Recipes ranked highest by the family. Use this when the user
-        asks for 'favorites', 'top rated', 'what we liked', etc.
+    def top_rated_recipes(
+        limit: int = 15,
+        min_rating: float = 4.0,
+        favorites_only: bool = False,
+    ) -> str:
+        """Recipes the CURRENT user has rated highly (or favorited) in
+        Mealie. Use this when the user asks for 'our favorites',
+        'top rated', 'what we liked', etc.
+
+        Ratings are per-user, so results reflect the signed-in user's
+        ratings — not an aggregate. Household-wide preferences belong in
+        remember_household.
 
         Args:
-            limit: Maximum number of recipes to return (default 10).
-            tag_name: Optional tag filter (e.g., 'Maryjean').
-            cookbook_slug: Optional cookbook slug; use list_cookbooks first.
+            limit: Maximum number of recipes to return (default 15).
+            min_rating: Only include recipes rated this high or better
+                (default 4.0 — 4-star and up).
+            favorites_only: If true, return only recipes the user
+                marked as a favorite, ignoring numeric rating.
         """
         try:
-            body = user_client.top_rated_recipes(
-                tag_name=tag_name or None,
-                cookbook_slug=cookbook_slug or None,
-                per_page=limit,
+            items = user_client.top_rated_recipes(
+                min_rating=min_rating,
+                favorites_only=favorites_only,
+                limit=limit,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("top_rated_recipes failed")
-            return f"(search error: {exc})"
-        items = [it for it in (body.get("items") or []) if (it.get("rating") or 0) > 0]
+            return f"(fetch error: {exc})"
         if not items:
-            return "No rated recipes found. Has anyone rated recipes in Mealie yet?"
-        lines = [
-            f"- **[{it['name']}]({_recipe_url(it['slug'])})** — ⭐ {it['rating']}/5  \n"
-            f"  `slug: {it['slug']}`"
-            for it in items
-        ]
+            kind = "favorites" if favorites_only else f"recipes rated ≥ {min_rating}"
+            return f"No {kind} found for the current user."
+        lines: list[str] = []
+        for it in items:
+            star = f" ⭐ {it['rating']}/5" if it.get("rating") else ""
+            heart = " ❤️" if it.get("isFavorite") else ""
+            desc = (it.get("description") or "")[:100]
+            desc = desc + "…" if len(it.get("description") or "") > 100 else desc
+            suffix = f" — {desc}" if desc else ""
+            lines.append(
+                f"- **[{it['name']}]({_recipe_url(it['slug'])})**{star}{heart}{suffix}  \n"
+                f"  `slug: {it['slug']}`"
+            )
         return "\n".join(lines)
 
     @tool

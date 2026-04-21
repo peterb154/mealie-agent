@@ -84,31 +84,65 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def self_ratings(self) -> list[dict[str, Any]]:
+        """Return the current user's per-recipe ratings + favorite flags.
+        Mealie's recipe-level `rating` field is always null — the real data
+        lives here, keyed by recipeId."""
+        r = self._client.get("/api/users/self/ratings")
+        r.raise_for_status()
+        return (r.json() or {}).get("ratings", [])
+
     def top_rated_recipes(
         self,
         *,
-        tag_name: str | None = None,
-        cookbook_slug: str | None = None,
-        per_page: int = 20,
-    ) -> dict[str, Any]:
-        """Recipes ordered by rating (desc). Optional tag / cookbook filter."""
-        params: dict[str, Any] = {
-            "perPage": per_page,
-            "page": 1,
-            "orderBy": "rating",
-            "orderDirection": "desc",
-        }
-        if cookbook_slug:
-            cb = self._client.get(f"/api/households/cookbooks/{cookbook_slug}")
-            cb.raise_for_status()
-            qf = (cb.json() or {}).get("queryFilterString")
-            if qf:
-                params["queryFilter"] = qf
-        elif tag_name:
-            params["queryFilter"] = f'tags.name CONTAINS ALL ["{tag_name}"]'
-        r = self._client.get("/api/recipes", params=params)
-        r.raise_for_status()
-        return r.json()
+        min_rating: float = 4.0,
+        favorites_only: bool = False,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return the current user's top-rated recipes, enriched with
+        slug/name/description. Joins /api/users/self/ratings with the
+        recipe-detail endpoint."""
+        ratings = self.self_ratings()
+        # Filter + sort client-side.
+        picks: list[dict[str, Any]] = []
+        for row in ratings:
+            rating = row.get("rating")
+            is_fav = row.get("isFavorite") or False
+            if favorites_only:
+                if not is_fav:
+                    continue
+            else:
+                if not (isinstance(rating, (int, float)) and rating >= min_rating):
+                    continue
+            picks.append(row)
+        picks.sort(
+            key=lambda r: (r.get("rating") or 0, r.get("isFavorite") or False),
+            reverse=True,
+        )
+        picks = picks[:limit]
+
+        enriched: list[dict[str, Any]] = []
+        for row in picks:
+            rid = row.get("recipeId")
+            if not rid:
+                continue
+            try:
+                rr = self._client.get(f"/api/recipes/{rid}")
+                rr.raise_for_status()
+                r = rr.json()
+            except httpx.HTTPError:
+                continue
+            enriched.append(
+                {
+                    "id": rid,
+                    "slug": r.get("slug"),
+                    "name": r.get("name"),
+                    "description": (r.get("description") or "").strip(),
+                    "rating": row.get("rating"),
+                    "isFavorite": row.get("isFavorite") or False,
+                }
+            )
+        return enriched
 
     def search_recipes_text(
         self,
