@@ -214,4 +214,10 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
                 out.append(f"{i}. {s.get('text', '').strip()}")
         return "\n".join(out)
 
-    return [search_recipes, search_recipes_text, list_cookbooks, get_recipe]
+    return [
+        search_recipes,
+        search_recipes_text,
+        top_rated_recipes,
+        list_cookbooks,
+        get_recipe,
+    ]
