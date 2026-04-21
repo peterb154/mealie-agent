@@ -201,6 +201,12 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def delete_meal_plan_entry(self, entry_id: int | str) -> None:
+        """Remove one scheduled meal from the household meal plan."""
+        r = self._client.delete(f"/api/households/mealplans/{entry_id}")
+        if r.status_code >= 400:
+            r.raise_for_status()
+
     # --- shopping lists -----------------------------------------------------
 
     def list_shopping_lists(self) -> list[dict[str, Any]]:

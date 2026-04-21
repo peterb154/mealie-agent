@@ -179,9 +179,25 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
             return f"(add failed: {exc})"
         return f"Scheduled: {date} {entry_type} — {title or recipe_slug} (id={result.get('id')})"
 
+    @tool
+    def delete_meal_plan_entry(entry_id: int) -> str:
+        """Remove one scheduled meal from the household meal plan. Use
+        this to fix duplicate or wrong entries — get the id from
+        list_meal_plan's output.
+
+        Args:
+            entry_id: Numeric meal-plan entry id (shown in list_meal_plan).
+        """
+        try:
+            user_client.delete_meal_plan_entry(entry_id)
+        except Exception as exc:  # noqa: BLE001
+            return f"(delete failed: {exc})"
+        return f"deleted meal-plan entry {entry_id}"
+
     return [
         list_meal_plan,
         list_ingredients_for_meal_plan,
         meal_plan_history,
         add_to_meal_plan,
+        delete_meal_plan_entry,
     ]
