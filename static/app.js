@@ -18,8 +18,9 @@ marked.setOptions({ breaks: true, gfm: true });
 // the user's chat open when they click through to a Mealie recipe.
 marked.use({
     renderer: {
-        link({ href, title, tokens }) {
-            const text = this.parser.parseInline(tokens);
+        // marked v12 uses the legacy positional signature:
+        // link(href, title, text) — text is already rendered HTML.
+        link(href, title, text) {
             const t = title ? ` title="${title}"` : "";
             return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${text}</a>`;
         },
@@ -143,16 +144,21 @@ async function send(message, token) {
                     markdownBuf = "";
                 }
                 markdownBuf += data;
+                let html;
                 try {
-                    agentMsg.innerHTML = marked.parse(markdownBuf);
+                    html = marked.parse(markdownBuf);
                 } catch (err) {
-                    // Partial markdown (unclosed [, half a URL, etc.)
-                    // can trip marked mid-stream. Fall back to plain text
-                    // so the next chunk gets another shot — never let a
-                    // parse error halt the stream loop.
                     console.warn("[chat] marked threw on partial buffer", err);
-                    agentMsg.textContent = markdownBuf;
+                    // Preserve newlines as <br> so the fallback stays
+                    // readable (CSS sets white-space: normal on markdown
+                    // bubbles, which otherwise collapses them to spaces).
+                    const esc = markdownBuf
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                    html = esc.replace(/\n/g, "<br>");
                 }
+                agentMsg.innerHTML = html;
                 logEl.scrollTop = logEl.scrollHeight;
             } else if (event === "thinking") {
                 append("think", data);
