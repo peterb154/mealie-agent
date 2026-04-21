@@ -1,0 +1,74 @@
+// meal-agent shim — loaded into Mealie's HTML by NPM's sub_filter rule.
+//
+// Injects a floating "Meal Assistant" button on every Mealie page. On
+// click, reads the Nuxt-stored JWT from Mealie's localStorage and opens
+// mealie-agent in a new tab with the token handed off via URL fragment.
+// Runs in recipes.epetersons.com's origin, so localStorage is visible.
+//
+// Kept deliberately small + dependency-free. Catches its own errors so a
+// breakage here can never take down Mealie itself.
+
+(function () {
+    "use strict";
+    if (window.__mealAgentShim) return;        // idempotent
+    window.__mealAgentShim = true;
+
+    const CHAT_URL = "https://mealie-agent.epetersons.com";
+    const LOGIN_HINT = "Open Mealie's login page first, then try again.";
+
+    function getToken() {
+        try {
+            const raw = localStorage.getItem("auth._token.local");
+            if (!raw) return null;
+            return raw.startsWith("Bearer ") ? raw.slice(7) : raw;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function openChat() {
+        const token = getToken();
+        if (!token) { alert("No Mealie session found. " + LOGIN_HINT); return; }
+        window.open(`${CHAT_URL}/#token=${token}`, "_blank", "noopener,noreferrer");
+    }
+
+    function inject() {
+        try {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = "🍳 Meal Assistant";
+            btn.title = "Open Meal Assistant (opens in a new tab)";
+            btn.setAttribute("aria-label", "Open Meal Assistant");
+            Object.assign(btn.style, {
+                position: "fixed",
+                bottom: "1.25rem",
+                right: "1.25rem",
+                zIndex: "9999",
+                padding: "0.6rem 1rem",
+                borderRadius: "999px",
+                border: "none",
+                background: "#E58325",   // Mealie's primary
+                color: "white",
+                fontFamily: "inherit",
+                fontSize: "0.9rem",
+                fontWeight: "600",
+                cursor: "pointer",
+                boxShadow: "0 6px 20px -6px rgba(0,0,0,0.4)",
+                transition: "transform 0.1s ease",
+            });
+            btn.addEventListener("mouseenter", () => btn.style.transform = "scale(1.04)");
+            btn.addEventListener("mouseleave", () => btn.style.transform = "scale(1)");
+            btn.addEventListener("click", openChat);
+            document.body.appendChild(btn);
+        } catch (err) {
+            // Never break Mealie. Log and bail.
+            console.warn("[meal-agent-shim] inject failed:", err);
+        }
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", inject, { once: true });
+    } else {
+        inject();
+    }
+})();
