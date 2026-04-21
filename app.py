@@ -13,7 +13,6 @@ from strands.models.bedrock import BedrockModel
 from strands_pg import (
     PgPromptStore,
     PgSessionManager,
-    commit_sha,
     make_app,
     memory_tools,
 )
@@ -90,7 +89,9 @@ app = make_app(
     auth_verifier=verify_mealie_jwt,
     cache_agents=False,          # user JWTs rotate — rebuild per request
     deploy=True,
-    health_info=lambda: {"commit": commit_sha("/app")},
+    # GIT_SHA is baked in at build time via docker-compose build-arg from the
+    # host's git checkout. Falls back to 'dev' outside of a built image.
+    health_info=lambda: {"commit": os.environ.get("GIT_SHA", "dev")},
     health_path="/api/health",
 )
 

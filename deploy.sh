@@ -23,6 +23,9 @@ git fetch origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 echo "[deploy] rebuilding and restarting stack..."
+# Export GIT_SHA so docker-compose's build-arg picks it up; bakes it into
+# the image for /api/health to report.
+export GIT_SHA="$(git rev-parse --short HEAD)"
 docker compose up -d --build
 
-echo "[deploy] done"
+echo "[deploy] done at $GIT_SHA"

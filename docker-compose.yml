@@ -18,6 +18,10 @@ services:
   agent:
     build:
       context: .
+      args:
+        # Stamp the current git SHA into the image so /api/health can report it
+        # and n8n's deploy workflow can verify the new commit actually landed.
+        GIT_SHA: ${GIT_SHA:-dev}
     depends_on:
       db:
         condition: service_healthy
@@ -25,13 +29,12 @@ services:
       - .env
     environment:
       STRANDS_PG_DSN: postgresql://strands:strands@db:5432/strands
+      DEPLOY_TRIGGER: /opt/mealie-agent/.deploy-trigger
     volumes:
-      # Only needed for Option A (AWS_PROFILE with SSO/SAML/STS creds).
-      # rw so boto3 can refresh SSO tokens into ~/.aws/sso/cache.
-      # If you're using static IAM user keys (Option B in .env.example),
-      # DELETE this volume block — the bind mount fails on hosts without
-      # ~/.aws (typical VPS / fresh LXC).
-      - ${HOME}/.aws:/root/.aws
+      # Mount the host's repo checkout so /api/deploy can touch the
+      # trigger file there. A host-side systemd path unit watches for
+      # changes and handles git pull + rebuild. No docker.sock needed.
+      - .:/opt/mealie-agent
     ports:
       - "8000:8000"
     restart: unless-stopped

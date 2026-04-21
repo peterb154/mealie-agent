@@ -23,11 +23,18 @@ COPY migrations/   /app/migrations/
 COPY app.py       /app/
 COPY tools/       /app/tools/
 COPY prompts/     /app/prompts/
+COPY scripts/     /app/scripts/
+COPY static/      /app/static/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV STRANDS_PG_MIGRATIONS_DIR=/app/migrations \
     PORT=8000
+
+# Bake the commit SHA into the image so /api/health can report it.
+# docker-compose passes this as a build arg from the host's git checkout.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
 
 EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
