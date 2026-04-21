@@ -160,6 +160,40 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(out)
 
     @tool
+    def delete_shopping_item(item_id: str) -> str:
+        """Remove a single item from a shopping list.
+
+        Args:
+            item_id: Item UUID from show_shopping_list.
+        """
+        try:
+            user_client.delete_shopping_item(item_id)
+        except Exception as exc:  # noqa: BLE001
+            return f"(delete failed: {exc})"
+        return f"deleted: {item_id}"
+
+    @tool
+    def clear_shopping_list(list_id: str, checked_only: bool = False) -> str:
+        """Wipe every item off a shopping list in one call.
+
+        Args:
+            list_id: Target list UUID.
+            checked_only: If true, delete only already-checked items
+                (post-shopping cleanup). Default false = clear everything.
+        """
+        try:
+            deleted, failed = user_client.clear_shopping_list(
+                list_id, checked_only=checked_only
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("clear_shopping_list failed")
+            return f"(clear failed: {exc})"
+        scope = "checked items" if checked_only else "items"
+        if failed:
+            return f"Cleared {deleted} {scope}; {failed} failed."
+        return f"Cleared {deleted} {scope}."
+
+    @tool
     def check_shopping_item(item_id: str, checked: bool = True) -> str:
         """Mark a shopping-list item checked/unchecked.
 
@@ -179,4 +213,6 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
         add_to_shopping_list,
         bulk_add_to_shopping_list,
         check_shopping_item,
+        delete_shopping_item,
+        clear_shopping_list,
     ]

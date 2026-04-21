@@ -236,3 +236,31 @@ class MealieClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def delete_shopping_item(self, item_id: str) -> None:
+        """Remove one item from a shopping list."""
+        r = self._client.delete(f"/api/households/shopping/items/{item_id}")
+        # 200 or 204 both mean success on Mealie.
+        if r.status_code >= 400:
+            r.raise_for_status()
+
+    def clear_shopping_list(
+        self, list_id: str, *, checked_only: bool = False
+    ) -> tuple[int, int]:
+        """Delete every item on the list (or only the checked ones if
+        ``checked_only`` is True). Returns (deleted, failed)."""
+        lst = self.get_shopping_list(list_id)
+        items = lst.get("listItems") or []
+        target = [it for it in items if (not checked_only or it.get("checked"))]
+        deleted = 0
+        failed = 0
+        for it in target:
+            iid = it.get("id")
+            if not iid:
+                continue
+            try:
+                self.delete_shopping_item(iid)
+                deleted += 1
+            except httpx.HTTPError:
+                failed += 1
+        return deleted, failed
