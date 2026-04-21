@@ -110,11 +110,17 @@ async function send(message, token) {
             buf = buf.slice(idx + 2);
             const lines = frame.split("\n");
             let event = "message";
-            let data = "";
+            const dataParts = [];
             for (const line of lines) {
                 if (line.startsWith("event: ")) event = line.slice(7);
-                else if (line.startsWith("data: ")) data += line.slice(6);
+                // Per SSE spec, multiple `data:` lines in a frame are joined
+                // with \n — sse-starlette uses this to encode newlines in a
+                // single event. Concatenating without \n flattens lists and
+                // headers back into one paragraph.
+                else if (line.startsWith("data: ")) dataParts.push(line.slice(6));
+                else if (line.startsWith("data:")) dataParts.push(line.slice(5));
             }
+            const data = dataParts.join("\n");
             if (event === "text") {
                 markdownBuf += data;
                 agentMsg.innerHTML = marked.parse(markdownBuf);
