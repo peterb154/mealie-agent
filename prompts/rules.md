@@ -155,16 +155,22 @@ the current / planned week:
    separated items. Use the ``display | search`` format on any line
    whose display text has quantities, units, or prep notes — the
    search term goes AFTER the pipe and should be the plain ingredient
-   name so the grocery link actually surfaces products. Examples:
+   name so the grocery link actually surfaces products.
 
-       2.5 lb chuck beef, cut into 1-inch cubes | chuck roast
-       10 oz skinless salmon fillet | salmon fillet
-       1 bottle dry red wine (Côte du Rhône) | red wine
-       ½ cup Israeli couscous | Israeli couscous
-       4 green bell peppers | green bell peppers
+   **Include the source recipe(s) in every display** so the user can
+   tell at a glance what each item is for when checking off at the
+   store (and what to drop if they swap a meal). Put the meal names
+   in parentheses at the END of the display text. Example:
+
+       3 lb chicken breast (Thyme Gravy Chicken, Smoky Paprika Chicken) | chicken breast
+       2.5 lb chuck beef, cubed (Beef Bourguignon) | chuck roast
+       10 oz skinless salmon fillet (Blacked Cedar Plank Salmon) | salmon fillet
+       1 bottle dry red wine (Beef Bourguignon) | red wine
+       4 green bell peppers (Tuscan Beef-Stuffed Peppers) | green bell peppers
 
    Lines without a ``|`` use the whole line for both display and
-   search — fine for already-clean one-word items.
+   search — fine for already-clean one-word items, but the meal
+   attribution should still be there in parens.
 
    If the user has told you they shop at a specific store (check
    `recall_personal` for "grocery" / "store" / "shop"), pass its
