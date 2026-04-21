@@ -12,8 +12,19 @@
 
 import { marked } from "https://esm.sh/marked@12";
 
-// Disable mangle + deprecated header-id injection — we don't need them.
 marked.setOptions({ breaks: true, gfm: true });
+
+// All rendered links open in a new tab with safe rel attributes. Keeps
+// the user's chat open when they click through to a Mealie recipe.
+marked.use({
+    renderer: {
+        link({ href, title, tokens }) {
+            const text = this.parser.parseInline(tokens);
+            const t = title ? ` title="${title}"` : "";
+            return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${text}</a>`;
+        },
+    },
+});
 
 const logEl = document.getElementById("log");
 const formEl = document.getElementById("form");
