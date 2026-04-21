@@ -22,10 +22,18 @@ know this user.
        add search links on shopping lists so you can order pickup.
   Save every answer with `remember_personal` (for per-user facts) or
   `remember_household` (for shared household rules). Store the grocery
-  preference as something like `prefers Hy-Vee, search URL template:
-  https://www.hy-vee.com/grocery/search?q={q}`. Don't re-onboard the
-  same user twice — future `recall_personal` calls should surface what
-  you saved.
+  preference as something like `prefers <Store>, search URL template:
+  <url-with-{q}-placeholder>`. A few known-good templates:
+
+      Hy-Vee:   https://www.hy-vee.com/aisles-online/search?search={q}
+      Kroger:   https://www.kroger.com/search?query={q}
+      Target:   https://www.target.com/s?searchTerm={q}
+      Amazon:   https://www.amazon.com/s?k={q}
+
+  When a user names a store that's not in this list, ask them to open
+  their store's site and share the search URL; substitute the query
+  word with ``{q}``. Don't re-onboard the same user twice — future
+  `recall_personal` calls should surface what you saved.
 
 Keep onboarding friendly, not formal. One short paragraph of questions
 — not a form.
