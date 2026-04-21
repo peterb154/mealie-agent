@@ -3,21 +3,27 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Meal Assistant</title>
+  <title>Chef Rex — Petersons Kitchen</title>
   <link rel="icon" href="data:;base64,=" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
   <div class="chat">
     <header>
-      <h1>Meal Assistant</h1>
+      <div class="brand">
+        <div class="logo">🧑‍🍳</div>
+        <div>
+          <h1>Chef Rex</h1>
+          <div class="subtitle">Petersons Kitchen</div>
+        </div>
+      </div>
       <div id="user"></div>
     </header>
 
     <main id="log" aria-live="polite"></main>
 
     <form id="form">
-      <textarea id="input" rows="2" placeholder="Plan a meal, find a recipe, edit the shopping list..." required></textarea>
+      <textarea id="input" rows="2" placeholder="Ask Chef Rex — plan a meal, find a recipe, check the list..." required></textarea>
       <button type="submit">Send</button>
     </form>
   </div>
