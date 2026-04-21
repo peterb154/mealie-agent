@@ -16,14 +16,39 @@
     const CHAT_URL = "https://mealie-agent.epetersons.com";
     const LOGIN_HINT = "Open Mealie's login page first, then try again.";
 
-    function getToken() {
-        try {
-            const raw = localStorage.getItem("auth._token.local");
-            if (!raw) return null;
-            return raw.startsWith("Bearer ") ? raw.slice(7) : raw;
-        } catch (_) {
-            return null;
+    function _clean(t) {
+        if (!t) return null;
+        t = String(t).trim();
+        if (t.startsWith("Bearer ")) t = t.slice(7);
+        return t || null;
+    }
+
+    function _cookie(name) {
+        const pairs = (document.cookie || "").split("; ");
+        for (const p of pairs) {
+            const eq = p.indexOf("=");
+            if (eq > -1 && p.slice(0, eq) === name) {
+                return decodeURIComponent(p.slice(eq + 1));
+            }
         }
+        return null;
+    }
+
+    function getToken() {
+        // Mealie v3 stores the JWT in a couple of places depending on
+        // version/config. Check them all — the first hit wins.
+        try {
+            // 1. Nuxt @auth module (most Mealie installs).
+            const a = _clean(localStorage.getItem("auth._token.local"));
+            if (a) return a;
+            // 2. Alternative localStorage key some Mealie builds use.
+            const b = _clean(localStorage.getItem("mealie.access_token"));
+            if (b) return b;
+            // 3. Readable cookie (non-HttpOnly).
+            const c = _clean(_cookie("mealie.access_token"));
+            if (c) return c;
+        } catch (_) { /* SecurityError in some iframes; fall through */ }
+        return null;
     }
 
     function openChat() {
