@@ -73,6 +73,34 @@ main#log {
 }
 .msg.user   { background: var(--user-bg); align-self: flex-end; }
 .msg.agent  { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; }
+
+/* Markdown rendered inside agent bubbles — trim default margins so the
+   bubble doesn't grow a lot of empty space around the content. */
+.msg.markdown { white-space: normal; }
+.msg.markdown p:first-child { margin-top: 0; }
+.msg.markdown p:last-child  { margin-bottom: 0; }
+.msg.markdown p { margin: 0.4em 0; }
+.msg.markdown ul, .msg.markdown ol { margin: 0.4em 0; padding-left: 1.4em; }
+.msg.markdown li { margin: 0.15em 0; }
+.msg.markdown code {
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    background: var(--tool-bg);
+    font-size: 0.9em;
+    font-family: ui-monospace, monospace;
+}
+.msg.markdown pre {
+    background: var(--tool-bg);
+    padding: 0.6em 0.8em;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+.msg.markdown pre code { padding: 0; background: none; }
+.msg.markdown a { color: var(--accent); }
+.msg.markdown h1, .msg.markdown h2, .msg.markdown h3 {
+    margin: 0.4em 0 0.2em; font-size: 1.05em;
+}
+.msg.markdown strong { font-weight: 600; }
 .msg.think  { color: var(--think-fg); font-style: italic; font-size: 0.85rem; }
 .msg.tool   { background: var(--tool-bg); color: var(--tool-fg); font-size: 0.8rem; font-family: ui-monospace, monospace; }
 .msg.err    { background: #fee2e2; color: #991b1b; }

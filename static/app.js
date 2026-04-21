@@ -10,6 +10,11 @@
 // token in our own localStorage under `mealieAgentToken`, strip the
 // fragment, and use it on every request.
 
+import { marked } from "https://esm.sh/marked@12";
+
+// Disable mangle + deprecated header-id injection — we don't need them.
+marked.setOptions({ breaks: true, gfm: true });
+
 const logEl = document.getElementById("log");
 const formEl = document.getElementById("form");
 const inputEl = document.getElementById("input");
@@ -66,7 +71,12 @@ async function showWhoami(token) {
 async function send(message, token) {
     btnEl.disabled = true;
     append("user", message);
-    const agentMsg = append("agent", "");
+    // Agent message: accumulate plain-text chunks in markdownBuf, re-render
+    // the whole buffer as HTML on each update. Streaming a partial markdown
+    // document through marked is resilient — unclosed tokens render as
+    // plain text until the closer arrives.
+    const agentMsg = append("agent markdown", "");
+    let markdownBuf = "";
 
     // sse-starlette over fetch + ReadableStream — EventSource doesn't allow
     // custom headers, and we need Authorization.
@@ -106,7 +116,8 @@ async function send(message, token) {
                 else if (line.startsWith("data: ")) data += line.slice(6);
             }
             if (event === "text") {
-                agentMsg.textContent += data;
+                markdownBuf += data;
+                agentMsg.innerHTML = marked.parse(markdownBuf);
                 logEl.scrollTop = logEl.scrollHeight;
             } else if (event === "thinking") {
                 append("think", data);
