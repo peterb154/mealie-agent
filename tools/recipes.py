@@ -8,6 +8,7 @@ through their own JWT (Mealie handles RBAC).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from strands import tool
@@ -17,6 +18,20 @@ from tools.embedding import embed
 from tools.mealie_client import MealieClient
 
 logger = logging.getLogger(__name__)
+
+_MEALIE_URL = os.environ.get("MEALIE_URL", "").rstrip("/")
+# Mealie v3's Nuxt route pattern is /g/{groupSlug}/r/{recipeSlug}. We took
+# the group slug from the user's context ("home" for this install); if a
+# future install runs with a different group, thread it through context.
+_MEALIE_GROUP_SLUG = os.environ.get("MEALIE_GROUP_SLUG", "home")
+
+
+def _recipe_url(slug: str) -> str:
+    """Mealie's frontend recipe page URL. The agent surfaces these so the
+    user can click through to the full recipe in Mealie."""
+    if not _MEALIE_URL:
+        return slug
+    return f"{_MEALIE_URL}/g/{_MEALIE_GROUP_SLUG}/r/{slug}"
 
 # --- caps -------------------------------------------------------------------
 # How much recipe JSON we hand back to the LLM per get_recipe call.
@@ -73,7 +88,14 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             rows = cur.fetchall()
         if not rows:
             return "No recipes found. Has the sync run?"
-        lines = [f"- [{slug}] {name} — {snippet[:100]}" for slug, name, snippet in rows]
+        # Tool output is markdown the agent can quote verbatim. Full URL on
+        # each entry so the agent's response is clickable even if the model
+        # forgets the base URL.
+        lines = [
+            f"- **[{name}]({_recipe_url(slug)})** — {snippet[:120].strip()}  \n"
+            f"  `slug: {slug}`"
+            for slug, name, snippet in rows
+        ]
         return "\n".join(lines)
 
     @tool
@@ -93,7 +115,8 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         steps = trimmed.pop("recipeInstructions", []) or []
 
         out: list[str] = []
-        out.append(f"# {trimmed.get('name', slug)}")
+        name = trimmed.get("name", slug)
+        out.append(f"# [{name}]({_recipe_url(slug)})")
         if desc := trimmed.get("description"):
             out.append(desc)
         if trimmed.get("totalTime"):
