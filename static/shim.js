@@ -99,19 +99,37 @@
         }
     }
 
-    // Nuxt hydration replaces body contents AFTER DOMContentLoaded, which
-    // wipes any early injection. A MutationObserver on <body> re-adds the
-    // button whenever it disappears (route changes, hot-reloads, etc.).
-    function startObserver() {
+    // Nuxt hydration replaces document.body wholesale (not just children)
+    // and may do so multiple times for route transitions. We use three
+    // mechanisms together so at least one catches every case:
+    //   1. a MutationObserver on <html> so we see body being swapped out
+    //   2. a MutationObserver on whatever <body> currently is, re-attached
+    //      when it changes, so we see children-only changes
+    //   3. a cheap setInterval as belt-and-suspenders for anything exotic
+    //      (Safari quirks, mobile webview rendering, etc.)
+    let bodyObs = null;
+    function attachBodyObserver() {
         if (!document.body) return;
+        if (bodyObs) bodyObs.disconnect();
+        bodyObs = new MutationObserver(() => ensureBtn());
+        bodyObs.observe(document.body, { childList: true, subtree: false });
+    }
+
+    function startAll() {
         ensureBtn();
-        const obs = new MutationObserver(() => ensureBtn());
-        obs.observe(document.body, { childList: true, subtree: false });
+        attachBodyObserver();
+        if (document.documentElement) {
+            new MutationObserver(() => {
+                ensureBtn();
+                attachBodyObserver();   // <body> may have been replaced
+            }).observe(document.documentElement, { childList: true, subtree: false });
+        }
+        setInterval(ensureBtn, 2000);
     }
 
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", startObserver, { once: true });
+        document.addEventListener("DOMContentLoaded", startAll, { once: true });
     } else {
-        startObserver();
+        startAll();
     }
 })();
