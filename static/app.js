@@ -1,8 +1,9 @@
 // Tiny chat client: reads the Mealie JWT, posts to /chat/stream, renders
 // SSE events.
 //
-// Mealie v3 is stateless JWT in localStorage (key: `mealie.access_token`)
-// — no cookies. localStorage is origin-scoped, so recipes.epetersons.com
+// Mealie v3 is stateless JWT in localStorage (Nuxt @auth module stores
+// `Bearer <jwt>` under `auth._token.local`) — no cookies. localStorage
+// is origin-scoped, so recipes.epetersons.com
 // and mealie-agent.epetersons.com CANNOT share it directly. Handoff is
 // via URL fragment: a Mealie-side link (or bookmarklet) sends the user
 // to `https://mealie-agent.epetersons.com/#token=<jwt>`, we stash the
@@ -17,23 +18,29 @@ const userEl = document.getElementById("user");
 
 const api = (path) => path; // same origin
 
+// Strip the "Bearer " prefix Nuxt @auth stores with the JWT.
+function _clean(t) {
+    if (!t) return t;
+    return t.startsWith("Bearer ") ? t.slice(7) : t;
+}
+
 function getToken() {
-    // 1. URL fragment: chat-mealie.epetersons.com/#token=...
+    // 1. URL fragment: mealie-agent.epetersons.com/#token=...
     const hash = new URLSearchParams(window.location.hash.slice(1));
     if (hash.get("token")) {
-        const t = hash.get("token");
+        const t = _clean(hash.get("token"));
         localStorage.setItem("mealieAgentToken", t);
         history.replaceState(null, "", window.location.pathname);
         return t;
     }
     // 2. Previously stored.
     const stored = localStorage.getItem("mealieAgentToken");
-    if (stored) return stored;
+    if (stored) return _clean(stored);
     // 3. Mealie's own localStorage key — only visible when same-origin.
-    //    (Present if this page is served under recipes.epetersons.com/chat
-    //    instead of a separate subdomain.)
-    const mealie = localStorage.getItem("mealie.access_token");
-    if (mealie) return mealie;
+    //    Mealie v3's Nuxt @auth module stores `Bearer <jwt>` under
+    //    `auth._token.local`. Useful for a future same-origin sidebar.
+    const mealie = localStorage.getItem("auth._token.local");
+    if (mealie) return _clean(mealie);
     return null;
 }
 
@@ -114,6 +121,14 @@ async function send(message, token) {
     btnEl.disabled = false;
     inputEl.focus();
 }
+
+// Enter submits; Shift+Enter inserts a newline.
+inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        formEl.requestSubmit();
+    }
+});
 
 formEl.addEventListener("submit", async (e) => {
     e.preventDefault();
