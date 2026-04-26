@@ -22,6 +22,7 @@ from tools.mealie_client import MealieClient
 from tools.mealplan import mealplan_tools
 from tools.recipes import recipe_tools
 from tools.shopping import shopping_tools
+from tools.weather import weather_tools
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -73,6 +74,7 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
             *recipe_tools(user_client),
             *mealplan_tools(user_client),
             *shopping_tools(user_client),
+            *weather_tools(),
             *memory_tools(
                 namespaces={
                     "personal": f"user:{email}",
