@@ -13,6 +13,7 @@ a stove in 95°F humidity.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -23,6 +24,33 @@ logger = logging.getLogger(__name__)
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+
+# Reused across calls — Open-Meteo benefits from connection reuse and the
+# tool can fire several times in a multi-day planning conversation.
+_CLIENT = httpx.Client(timeout=_TIMEOUT)
+
+# US state abbreviation → full name (lowercased). Open-Meteo's geocoder
+# returns admin1="Texas", not "TX", so when a user types "Paris, TX" we
+# need to expand the abbrev to match. Without this, "Paris, TX" silently
+# resolved to Paris, France because nothing in the candidate set matched
+# the literal string "tx".
+_US_STATES: dict[str, str] = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas",
+    "ca": "california", "co": "colorado", "ct": "connecticut",
+    "de": "delaware", "fl": "florida", "ga": "georgia", "hi": "hawaii",
+    "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa",
+    "ks": "kansas", "ky": "kentucky", "la": "louisiana", "me": "maine",
+    "md": "maryland", "ma": "massachusetts", "mi": "michigan",
+    "mn": "minnesota", "ms": "mississippi", "mo": "missouri",
+    "mt": "montana", "ne": "nebraska", "nv": "nevada",
+    "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico",
+    "ny": "new york", "nc": "north carolina", "nd": "north dakota",
+    "oh": "ohio", "ok": "oklahoma", "or": "oregon", "pa": "pennsylvania",
+    "ri": "rhode island", "sc": "south carolina", "sd": "south dakota",
+    "tn": "tennessee", "tx": "texas", "ut": "utah", "vt": "vermont",
+    "va": "virginia", "wa": "washington", "wv": "west virginia",
+    "wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
+}
 
 # WMO weather code → short human label. Open-Meteo returns ints; we map
 # the common ones. Anything unmapped falls through to "code N".
@@ -63,6 +91,7 @@ def _wmo_label(code: int | None) -> str:
     return _WMO.get(int(code), f"code {code}")
 
 
+@lru_cache(maxsize=64)
 def _geocode(location: str) -> dict[str, Any] | None:
     """Resolve a place string to lat/lon + display name.
 
@@ -70,27 +99,46 @@ def _geocode(location: str) -> dict[str, Any] | None:
     "Des Moines, IA". So we split on the first comma, geocode the city
     half, and use the region half (state name, country name, or country
     code) to disambiguate among multiple matches client-side.
+
+    Cached because households change cities ~never; repeated calls in a
+    planning session shouldn't re-hit the geocoder. Failures aren't
+    cached (the exception unwinds before lru_cache stores the result).
     """
     city, _, region = location.partition(",")
     city = city.strip()
     region = region.strip().lower()
     if not city:
         return None
-    with httpx.Client(timeout=_TIMEOUT) as c:
-        r = c.get(_GEOCODE_URL, params={"name": city, "count": 5})
-        r.raise_for_status()
-        results = (r.json() or {}).get("results") or []
+
+    # Build the set of region strings we'll accept as a match. For US
+    # state abbreviations, also accept the full state name so "TX"
+    # matches admin1="Texas".
+    region_candidates: set[str] = set()
+    if region:
+        region_candidates.add(region)
+        if region in _US_STATES:
+            region_candidates.add(_US_STATES[region])
+
+    r = _CLIENT.get(_GEOCODE_URL, params={"name": city, "count": 5})
+    r.raise_for_status()
+    results = (r.json() or {}).get("results") or []
     if not results:
         return None
-    if region:
+
+    if region_candidates:
         for hit in results:
             haystacks = (
                 str(hit.get("admin1", "")).lower(),
                 str(hit.get("country", "")).lower(),
                 str(hit.get("country_code", "")).lower(),
             )
-            if any(region == h or h.startswith(region) for h in haystacks):
-                return hit
+            for cand in region_candidates:
+                if any(cand == h or h.startswith(cand) for h in haystacks):
+                    return hit
+        # Region was specified but nothing matched. Fail loud rather
+        # than silently returning a far-away city with the same name
+        # (the "Paris, TX → Paris, France" trap).
+        return None
     return results[0]
 
 
@@ -116,7 +164,7 @@ def get_weather(location: str, days: int = 3) -> str:
     if not loc:
         return ("(weather error: no location given — ask the user where "
                 "they are and store it via remember_household)")
-    days = max(1, min(int(days), 7))
+    days = max(1, min(days, 7))
 
     try:
         place = _geocode(loc)
@@ -124,7 +172,8 @@ def get_weather(location: str, days: int = 3) -> str:
         logger.exception("geocode failed for %r", loc)
         return f"(weather error: geocoding failed: {exc})"
     if not place:
-        return f"(weather error: couldn't find a place named {loc!r})"
+        return (f"(weather error: couldn't resolve {loc!r} — try just the "
+                "city name, or a different region/country)")
 
     lat, lon = place["latitude"], place["longitude"]
     pretty = ", ".join(
@@ -143,10 +192,9 @@ def get_weather(location: str, days: int = 3) -> str:
         "forecast_days": days,
     }
     try:
-        with httpx.Client(timeout=_TIMEOUT) as c:
-            r = c.get(_FORECAST_URL, params=params)
-            r.raise_for_status()
-            data = r.json()
+        r = _CLIENT.get(_FORECAST_URL, params=params)
+        r.raise_for_status()
+        data = r.json()
     except Exception as exc:  # noqa: BLE001
         logger.exception("forecast failed for %r", loc)
         return f"(weather error: forecast fetch failed: {exc})"
