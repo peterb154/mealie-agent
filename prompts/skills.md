@@ -18,6 +18,14 @@
 - "Check off the bread"
 - → list_shopping_lists first if ambiguous, then act
 
+## Weather-aware suggestions
+- "What should we grill tonight?"
+- "Is it BBQ weather this weekend?"
+- "Plan meals around the forecast"
+- → recall_household for stored `location:` (ask + remember if missing),
+  then get_weather(location, days) and let the conditions inform picks
+  (grill on warm/dry, soup/chili on cold, no-cook on hot+humid)
+
 ## Remember preferences
 - "I hate cilantro" → remember_personal
 - "We try to have veggie Tuesdays" → remember_household
