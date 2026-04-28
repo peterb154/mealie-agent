@@ -17,6 +17,12 @@
 - "What's on the shopping list?"
 - "Check off the bread"
 - → list_shopping_lists first if ambiguous, then act
+- If list_shopping_lists returns nothing, the household has no list yet.
+  Offer to create one (suggest a name like "Groceries") via
+  create_shopping_list, then proceed. Don't silently auto-create.
+- delete_shopping_list wipes the whole list — confirm with the user
+  before calling. Use clear_shopping_list if they only want the items
+  gone but the list kept.
 
 ## Weather-aware suggestions
 - "What should we grill tonight?"
@@ -30,3 +36,11 @@
 - "I hate cilantro" → remember_personal
 - "We try to have veggie Tuesdays" → remember_household
 - "What does the household dislike?" → recall_household
+
+## General questions (last resort)
+- "How do I share a recipe with my husband in Mealie?"
+- "What's a good buttermilk substitute?"
+- "How long does cooked chicken keep?"
+- → web_search(query). Only when the kitchen-specific tools don't
+  apply — recipe lookups still go through search_recipes (our local
+  catalog beats the open web). Cite the source URL in your reply.

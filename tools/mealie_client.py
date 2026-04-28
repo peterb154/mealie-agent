@@ -220,6 +220,20 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def create_shopping_list(self, name: str) -> dict[str, Any]:
+        """Create a new shopping list scoped to the user's household."""
+        r = self._client.post(
+            "/api/households/shopping/lists", json={"name": name}
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def delete_shopping_list(self, list_id: str) -> None:
+        """Delete a shopping list and all of its items."""
+        r = self._client.delete(f"/api/households/shopping/lists/{list_id}")
+        if r.status_code >= 400:
+            r.raise_for_status()
+
     def add_to_shopping_list(
         self, *, list_id: str, note: str, quantity: float = 1.0
     ) -> dict[str, Any]:
