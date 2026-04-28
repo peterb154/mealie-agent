@@ -45,22 +45,29 @@ function _clean(t) {
     return t.startsWith("Bearer ") ? t.slice(7) : t;
 }
 
+// Safari's ITP throws SecurityError on storage access in cross-origin
+// iframes (which is exactly how the shim's drawer loads us). Treat any
+// failure as "no stored token" — we still get a fresh one from the URL
+// fragment on each iframe construction.
+function _lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function _lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* ITP */ } }
+
 function getToken() {
     // 1. URL fragment: mealie-agent.epetersons.com/#token=...
     const hash = new URLSearchParams(window.location.hash.slice(1));
     if (hash.get("token")) {
         const t = _clean(hash.get("token"));
-        localStorage.setItem("mealieAgentToken", t);
+        _lsSet("mealieAgentToken", t);
         history.replaceState(null, "", window.location.pathname);
         return t;
     }
     // 2. Previously stored.
-    const stored = localStorage.getItem("mealieAgentToken");
+    const stored = _lsGet("mealieAgentToken");
     if (stored) return _clean(stored);
     // 3. Mealie's own localStorage key — only visible when same-origin.
     //    Mealie v3's Nuxt @auth module stores `Bearer <jwt>` under
     //    `auth._token.local`. Useful for a future same-origin sidebar.
-    const mealie = localStorage.getItem("auth._token.local");
+    const mealie = _lsGet("auth._token.local");
     if (mealie) return _clean(mealie);
     return null;
 }

@@ -6,8 +6,10 @@
 // the iframe via URL fragment.
 //
 // Dev override: a host page can set
-//   window.__chefRexConfig = { chatUrl: "http://localhost:8080" }
-// before loading this script to point the iframe somewhere else.
+//   window.__chefRexConfig = { chatUrl: "http://localhost:8080/static/index.html" }
+// before loading this script to point the iframe somewhere else. Use the
+// explicit path to whatever serves the chat UI — the shim normalizes a
+// trailing slash, but won't synthesize a missing path component.
 //
 // Kept deliberately small + dependency-free. Catches its own errors so a
 // breakage here can never take down Mealie itself.
@@ -85,6 +87,9 @@
 
         drawerEl = document.createElement("div");
         drawerEl.id = DRAWER_ID;
+        drawerEl.setAttribute("role", "dialog");
+        drawerEl.setAttribute("aria-modal", "true");
+        drawerEl.setAttribute("aria-label", "Chef Rex chat");
         Object.assign(drawerEl.style, {
             position: "fixed",
             top: "0",

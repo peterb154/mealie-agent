@@ -162,11 +162,15 @@
         chatUrl: window.location.origin + "/static/index.html",
     };
 
-    // Prime a dummy token so the shim's getToken() succeeds. The
-    // standalone chat will 401 on submit (no real Mealie backend), but
-    // open/close/sizing all work. To test real chat against a running
-    // backend, paste a real Mealie JWT here:
-    if (!localStorage.getItem("auth._token.local")) {
+    // Prime a dummy token so the shim's getToken() succeeds. ONLY in
+    // local dev — this file ships under /static/ in production, and we
+    // don't want random visitors writing junk into their browser's
+    // mealie-agent.epetersons.com localStorage.
+    const _isLocalDev =
+        location.hostname === "localhost" ||
+        location.hostname === "127.0.0.1" ||
+        location.hostname === "::1";
+    if (_isLocalDev && !localStorage.getItem("auth._token.local")) {
       localStorage.setItem("auth._token.local", "Bearer dev-dummy-token");
     }
   </script>
