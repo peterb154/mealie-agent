@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from strands import Agent
+from strands.agent.conversation_manager import SlidingWindowConversationManager
 from strands.models.bedrock import BedrockModel
 from strands_tools import current_time
 
@@ -70,6 +71,12 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
     return Agent(
         model=BedrockModel(model_id=MODEL_ID),
         system_prompt=_system_prompt_for(context),
+        # session_id = f"user:{user_id}" (one thread per user, forever).
+        # Without a window, every turn replays the entire history — cost
+        # grows quadratically. 20 messages = ~5 tool-use cycles of recent
+        # context; durable facts go to memory_tools (remember_personal /
+        # remember_household), so dropping older raw turns is fine.
+        conversation_manager=SlidingWindowConversationManager(window_size=20),
         tools=[
             current_time,
             *recipe_tools(user_client),
