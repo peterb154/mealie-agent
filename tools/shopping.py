@@ -57,6 +57,43 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
         return "\n".join(f"- [{lst['id']}] {lst['name']}" for lst in lists)
 
     @tool
+    def create_shopping_list(name: str) -> str:
+        """Create a new shopping list in the user's household.
+
+        Mealie ships with no shopping list by default — use this when
+        list_shopping_lists returns nothing and the user wants to
+        start adding items, or when they explicitly ask for a new list.
+
+        Args:
+            name: Display name for the new list (e.g., 'Groceries',
+                'Costco run', 'Weekend party'). Keep it short.
+        """
+        try:
+            lst = user_client.create_shopping_list(name=name)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("create_shopping_list failed")
+            return f"(create failed: {exc})"
+        return f"Created list '{lst.get('name', name)}' (id={lst.get('id')})"
+
+    @tool
+    def delete_shopping_list(list_id: str) -> str:
+        """Delete an entire shopping list (and all its items).
+
+        Destructive — confirm with the user before calling. Use
+        clear_shopping_list instead if they only want the items gone
+        but the list itself kept.
+
+        Args:
+            list_id: Target list UUID from list_shopping_lists.
+        """
+        try:
+            user_client.delete_shopping_list(list_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("delete_shopping_list failed")
+            return f"(delete failed: {exc})"
+        return f"deleted list: {list_id}"
+
+    @tool
     def show_shopping_list(list_id: str) -> str:
         """Show items on a shopping list.
 
@@ -209,6 +246,8 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
 
     return [
         list_shopping_lists,
+        create_shopping_list,
+        delete_shopping_list,
         show_shopping_list,
         add_to_shopping_list,
         bulk_add_to_shopping_list,

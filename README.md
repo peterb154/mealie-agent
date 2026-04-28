@@ -89,12 +89,15 @@ fronts everything; Cloudflare is not in this path.
 | `add_to_meal_plan` | tools/mealplan.py | Schedule a recipe; defaults to dinner |
 | `delete_meal_plan_entry` | tools/mealplan.py | Fix duplicates |
 | `list_shopping_lists` | tools/shopping.py | Which lists exist |
+| `create_shopping_list` | tools/shopping.py | New list (Mealie ships with none) |
+| `delete_shopping_list` | tools/shopping.py | Remove a whole list |
 | `show_shopping_list` | tools/shopping.py | What's on a list |
 | `add_to_shopping_list` | tools/shopping.py | Single item |
 | `bulk_add_to_shopping_list` | tools/shopping.py | Many items, with grocery-search links |
 | `check_shopping_item` | tools/shopping.py | Mark bought / unbought |
 | `delete_shopping_item` | tools/shopping.py | Remove one |
 | `clear_shopping_list` | tools/shopping.py | Wipe list (all or checked-only) |
+| `web_search` | tools/web.py | Brave Search, last-resort general questions |
 | `remember_personal` / `recall_personal` | strands_pg.memory_tools | Per-user facts |
 | `remember_household` / `recall_household` | strands_pg.memory_tools | Shared household rules |
 
