@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fake Mealie — Chef Rex shim sandbox</title>
+  <style>
+    /* Roughly Mealie-flavored styling so we can eyeball the overlay
+       against something realistic. Not a 1:1 reproduction. */
+    :root {
+      --primary: #E58325;
+      --primary-dark: #C46A13;
+      --bg: #faf5ef;
+      --fg: #1f1f1f;
+      --muted: #6b6b6b;
+      --card: #ffffff;
+      --border: #e7e1d8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, "Helvetica Neue", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    header.appbar {
+      position: sticky;
+      top: 0;
+      background: var(--primary);
+      color: white;
+      padding: 0.85rem 1rem;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    header.appbar .menu {
+      font-size: 1.2rem; cursor: pointer; padding: 0.1rem 0.4rem;
+    }
+    main {
+      max-width: 56rem;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    h1 { font-size: 1.4rem; margin: 0.5rem 0 1rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.6rem;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    .card .img {
+      aspect-ratio: 4 / 3;
+      background: linear-gradient(135deg, #f3ead9, #e7d8b8);
+      display: grid; place-items: center;
+      font-size: 2rem; color: var(--primary-dark);
+    }
+    .card .body {
+      padding: 0.6rem 0.8rem;
+    }
+    .card h3 { margin: 0 0 0.2rem; font-size: 0.95rem; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+
+    /* The thing the user complained about: a Mealie-style FAB at
+       bottom-right. Our chef-rex pill should NOT cover this. */
+    .fab {
+      position: fixed;
+      bottom: 1.25rem;
+      right: 1.25rem;
+      width: 3.5rem; height: 3.5rem;
+      border-radius: 999px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      font-size: 1.6rem;
+      cursor: pointer;
+      box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.4);
+      z-index: 5;
+    }
+    .footer {
+      padding: 2rem 1rem 4rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="appbar">
+    <span class="menu">☰</span>
+    <span>Fake Mealie (shim sandbox)</span>
+  </header>
+
+  <main>
+    <h1>Recipes</h1>
+    <p style="color: var(--muted); margin-top: 0;">
+      This page exists to test the Chef Rex shim locally. It deliberately
+      includes a bottom-right FAB so we can verify the chat trigger no
+      longer covers it.
+    </p>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <button class="fab" type="button" aria-label="New recipe" title="Mealie's primary FAB (don't cover me)">+</button>
+
+  <div class="footer">
+    Scroll-test content below — make sure overlay still works while scrolled.
+  </div>
+
+  <script>
+    // Fill the grid with enough cards to force a scroll, so we can verify
+    // the trigger button stays put when scrolling.
+    const grid = document.getElementById("grid");
+    const recipes = [
+      ["Chicken Tikka Masala", "Indian · 45 min"],
+      ["Pasta Carbonara", "Italian · 25 min"],
+      ["Beef Bourguignon", "French · 3 hr"],
+      ["Pad Thai", "Thai · 30 min"],
+      ["Caesar Salad", "American · 15 min"],
+      ["Mushroom Risotto", "Italian · 40 min"],
+      ["Tacos al Pastor", "Mexican · 1 hr"],
+      ["Greek Moussaka", "Greek · 90 min"],
+      ["Sushi Bowl", "Japanese · 30 min"],
+      ["Shakshuka", "North African · 25 min"],
+      ["Pho", "Vietnamese · 2 hr"],
+      ["Lasagna", "Italian · 90 min"],
+      ["Coq au Vin", "French · 2 hr"],
+      ["Banh Mi", "Vietnamese · 30 min"],
+      ["Chili con Carne", "American · 1 hr"],
+      ["Paella", "Spanish · 45 min"],
+    ];
+    for (const [name, meta] of recipes) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="img">🍽️</div>
+        <div class="body">
+          <h3>${name}</h3>
+          <p>${meta}</p>
+        </div>
+      `;
+      grid.appendChild(card);
+    }
+  </script>
+
+  <!-- Configure the shim BEFORE loading it. -->
+  <script>
+    // Point the iframe at this same dev server's index.html. The explicit
+    // path matters because `python -m http.server` (run from project root)
+    // doesn't have a "/" → "static/index.html" handler the way FastAPI
+    // does in production. The shim normalizes the URL before adding the
+    // #token=… fragment, so this works in both setups.
+    window.__chefRexConfig = {
+        chatUrl: window.location.origin + "/static/index.html",
+    };
+
+    // Prime a dummy token so the shim's getToken() succeeds. ONLY in
+    // local dev — this file ships under /static/ in production, and we
+    // don't want random visitors writing junk into their browser's
+    // mealie-agent.epetersons.com localStorage.
+    const _isLocalDev =
+        location.hostname === "localhost" ||
+        location.hostname === "127.0.0.1" ||
+        location.hostname === "::1";
+    if (_isLocalDev && !localStorage.getItem("auth._token.local")) {
+      localStorage.setItem("auth._token.local", "Bearer dev-dummy-token");
+    }
+  </script>
+  <script src="../shim.js"></script>
+</body>
+</html>
