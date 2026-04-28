@@ -44,11 +44,20 @@ def web_tools() -> list[Any]:
         api_key = os.environ.get("BRAVE_API_KEY", "").strip()
         if not api_key:
             return "(web_search unavailable: BRAVE_API_KEY not set)"
-        n = max(1, min(int(max_results or 5), 10))
+        try:
+            n = max(1, min(int(max_results), 10)) if max_results else 5
+        except (TypeError, ValueError):
+            n = 5
         try:
             r = httpx.get(
                 _BRAVE_ENDPOINT,
-                params={"q": query, "count": n},
+                params={
+                    "q": query,
+                    "count": n,
+                    # Strip <strong> highlights from descriptions — pure
+                    # noise to the LLM and costs tokens on every call.
+                    "text_decorations": False,
+                },
                 headers={
                     "X-Subscription-Token": api_key,
                     "Accept": "application/json",
@@ -64,7 +73,7 @@ def web_tools() -> list[Any]:
         if not results:
             return f"(no results for: {query})"
         lines = []
-        for item in results[:n]:
+        for item in results:
             title = (item.get("title") or "").strip()
             url = (item.get("url") or "").strip()
             desc = (item.get("description") or "").strip()
