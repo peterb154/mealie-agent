@@ -12,6 +12,10 @@
 
 import { marked } from "https://esm.sh/marked@12";
 
+// When loaded inside the shim's drawer iframe, drop the standalone-page
+// chrome (centering, card border). CSS keys off `body.iframe-mode`.
+if (window.self !== window.top) document.body.classList.add("iframe-mode");
+
 marked.setOptions({ breaks: true, gfm: true });
 
 // All rendered links open in a new tab with safe rel attributes. Keeps
