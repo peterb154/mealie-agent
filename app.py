@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +41,15 @@ def _system_prompt_for(context: dict[str, Any]) -> str:
     base = prompts.assemble(SYSTEM_PROMPT_PARTS) or "You are a helpful assistant."
     email = context.get("email") or "unknown"
     household_id = context.get("household_id") or "unknown"
+    # Inject today's date deterministically — the model otherwise skips
+    # the current_time tool and hallucinates dates from training cutoff.
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d (%A)")
     return (
         f"{base}\n\n"
+        f"## CURRENT DATE\n"
+        f"Today is {today}. Use this for any 'today/tomorrow/this week' "
+        f"resolution — do not call current_time just to get the date.\n\n"
         f"## USER CONTEXT\n"
         f"You are talking to {email} (user_id={context.get('user_id')}).\n"
         f"Their household is {household_id}.\n"

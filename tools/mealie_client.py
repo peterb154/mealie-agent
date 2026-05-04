@@ -216,20 +216,22 @@ class MealieClient:
         title: str | None = None,
         recipe_id: str | None = None,
     ) -> dict[str, Any]:
-        """Move/edit one scheduled meal. GETs the existing entry, merges
-        any provided fields, then PUTs the full payload back — Mealie's
-        update endpoint expects a complete body."""
+        """Move/edit one scheduled meal. GETs the existing entry, applies
+        any provided fields onto it, and PUTs the whole thing back —
+        Mealie's UpdatePlanEntry requires id/groupId/userId, so we keep
+        the full payload and let Mealie ignore the extras (recipe,
+        householdId)."""
         g = self._client.get(f"/api/households/mealplans/{entry_id}")
         g.raise_for_status()
-        existing = g.json()
-        payload = {
-            "date": date if date is not None else existing.get("date"),
-            "entryType": entry_type if entry_type is not None else existing.get("entryType"),
-            "title": title if title is not None else (existing.get("title") or ""),
-            "recipeId": recipe_id
-            if recipe_id is not None
-            else (existing.get("recipe") or {}).get("id"),
-        }
+        payload = dict(g.json())
+        if date is not None:
+            payload["date"] = date
+        if entry_type is not None:
+            payload["entryType"] = entry_type
+        if title is not None:
+            payload["title"] = title
+        if recipe_id is not None:
+            payload["recipeId"] = recipe_id
         r = self._client.put(f"/api/households/mealplans/{entry_id}", json=payload)
         r.raise_for_status()
         return r.json()

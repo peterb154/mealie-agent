@@ -154,7 +154,8 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
 
         Args:
             date: ISO date (YYYY-MM-DD) to schedule the meal on. Resolve
-                relative dates like 'tonight' with current_time first.
+                relative words like 'tonight' against the CURRENT DATE
+                pinned in the system prompt.
             entry_type: One of 'breakfast', 'lunch', 'dinner', 'side'.
                 Defaults to 'dinner' — only pass something else when the
                 user explicitly asks for another meal.
