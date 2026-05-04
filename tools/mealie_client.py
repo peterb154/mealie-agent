@@ -207,6 +207,33 @@ class MealieClient:
         if r.status_code >= 400:
             r.raise_for_status()
 
+    def update_meal_plan_entry(
+        self,
+        entry_id: int | str,
+        *,
+        date: str | None = None,
+        entry_type: str | None = None,
+        title: str | None = None,
+        recipe_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Move/edit one scheduled meal. GETs the existing entry, merges
+        any provided fields, then PUTs the full payload back — Mealie's
+        update endpoint expects a complete body."""
+        g = self._client.get(f"/api/households/mealplans/{entry_id}")
+        g.raise_for_status()
+        existing = g.json()
+        payload = {
+            "date": date if date is not None else existing.get("date"),
+            "entryType": entry_type if entry_type is not None else existing.get("entryType"),
+            "title": title if title is not None else (existing.get("title") or ""),
+            "recipeId": recipe_id
+            if recipe_id is not None
+            else (existing.get("recipe") or {}).get("id"),
+        }
+        r = self._client.put(f"/api/households/mealplans/{entry_id}", json=payload)
+        r.raise_for_status()
+        return r.json()
+
     # --- shopping lists -----------------------------------------------------
 
     def list_shopping_lists(self) -> list[dict[str, Any]]:

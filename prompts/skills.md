@@ -10,7 +10,10 @@
 ## Plan a meal
 - "Put chicken tikka on Wednesday"
 - "What's planned for this week?"
-- → list_meal_plan for the window, add_to_meal_plan to schedule
+- "Push everything forward a day" / "Move Sunday's meal to today"
+- → list_meal_plan for the window, add_to_meal_plan to schedule.
+  To shift an existing slot, use update_meal_plan_entry — preserves the
+  entry id, no delete + re-add churn. delete_meal_plan_entry removes one.
 
 ## Shopping list
 - "Add eggs and milk to the list"

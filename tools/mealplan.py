@@ -180,6 +180,39 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
         return f"Scheduled: {date} {entry_type} — {title or recipe_slug} (id={result.get('id')})"
 
     @tool
+    def update_meal_plan_entry(
+        entry_id: int,
+        new_date: str = "",
+        new_entry_type: str = "",
+    ) -> str:
+        """Move/edit one scheduled meal in place. Use this to shift dates
+        (e.g. "push everything forward a day") or change the slot
+        (dinner → lunch) without delete + re-add — the entry id stays
+        stable. Get entry_id from list_meal_plan.
+
+        Args:
+            entry_id: Numeric meal-plan entry id (shown in list_meal_plan).
+            new_date: ISO date (YYYY-MM-DD) to move it to. Empty leaves
+                the date unchanged.
+            new_entry_type: One of breakfast/lunch/dinner/side. Empty
+                leaves the slot unchanged.
+        """
+        if not new_date and not new_entry_type:
+            return "(nothing to update — pass new_date and/or new_entry_type)"
+        try:
+            result = user_client.update_meal_plan_entry(
+                entry_id,
+                date=new_date or None,
+                entry_type=new_entry_type or None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("update_meal_plan_entry failed")
+            return f"(update failed: {exc})"
+        return (
+            f"moved entry {entry_id} → {result.get('date')} {result.get('entryType')}"
+        )
+
+    @tool
     def delete_meal_plan_entry(entry_id: int) -> str:
         """Remove one scheduled meal from the household meal plan. Use
         this to fix duplicate or wrong entries — get the id from
@@ -199,5 +232,6 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
         list_ingredients_for_meal_plan,
         meal_plan_history,
         add_to_meal_plan,
+        update_meal_plan_entry,
         delete_meal_plan_entry,
     ]
