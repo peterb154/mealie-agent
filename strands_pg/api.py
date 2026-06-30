@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+from strands.types.exceptions import SessionException
 
 from strands_pg.prompts import PgPromptStore
 
@@ -74,6 +75,23 @@ def commit_sha(repo_dir: str | Path | None = None, length: int = 7) -> str:
         return "unknown"
 
 
+def _message_text(message: dict[str, Any]) -> str:
+    """Join the ``text`` blocks of a Strands message into plain text.
+
+    A Strands message is ``{"role": ..., "content": [block, ...]}`` where a
+    block may be ``{"text": ...}``, ``{"toolUse": ...}``, ``{"toolResult":
+    ...}``, etc. We keep only the text blocks — so a tool-use-only assistant
+    message or a tool-result-only user message collapses to ``""`` and gets
+    filtered out of the rendered transcript.
+    """
+    parts = [
+        block["text"]
+        for block in message.get("content", [])
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    ]
+    return "\n".join(parts).strip()
+
+
 class ChatRequest(BaseModel):
     # session_id is required only when no auth_verifier is configured.
     # When auth is on, session_id is derived from the verifier's result.
@@ -84,6 +102,21 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     response: str
+
+
+class HistoryTurn(BaseModel):
+    role: str  # "user" | "assistant"
+    text: str
+
+
+class HistoryResponse(BaseModel):
+    session_id: str
+    turns: list[HistoryTurn]
+
+
+class ResetResponse(BaseModel):
+    session_id: str
+    cleared: bool
 
 
 class PromptBody(BaseModel):
@@ -263,6 +296,94 @@ def make_app(
                 "Cache-Control": "no-cache, no-transform",
             },
         )
+
+    def _resolve_session(
+        req_session_id: str | None, authorization: str
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Shared session resolution for the history/reset endpoints.
+
+        Mirrors the /chat logic: with auth on, session_id comes from the
+        verifier (the request can't spoof it); without auth, it must be a
+        query param.
+        """
+        if auth_verifier is not None:
+            context = _authed_context(authorization)
+            return context["session_id"], context
+        if not req_session_id:
+            raise HTTPException(
+                status_code=400, detail="session_id required (no auth_verifier configured)"
+            )
+        return req_session_id, None
+
+    @app.get("/chat/history", response_model=HistoryResponse)
+    def chat_history(
+        limit: int = 20,
+        session_id: str | None = None,
+        authorization: str = Header(default=""),
+    ) -> HistoryResponse:
+        """Return the recent user/assistant turns for the session.
+
+        ``limit`` caps how many text messages are returned (the UI maps
+        "N turns" to ``2*N`` messages). Tool-use / tool-result blocks are
+        dropped — only conversational text is replayed into the window.
+        """
+        limit = max(1, min(limit, 200))
+        sid, context = _resolve_session(session_id, authorization)
+        try:
+            agent = get_agent(sid, context=context)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — surface as 500
+            logger.exception("history failed for session_id=%s", sid)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        turns: list[HistoryTurn] = []
+        for message in agent.messages:
+            role = message.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = _message_text(message)
+            if text:
+                turns.append(HistoryTurn(role=role, text=text))
+        return HistoryResponse(session_id=sid, turns=turns[-limit:])
+
+    @app.post("/chat/reset", response_model=ResetResponse)
+    def chat_reset(
+        session_id: str | None = None,
+        authorization: str = Header(default=""),
+    ) -> ResetResponse:
+        """Wipe the session's stored conversation — a true fresh start.
+
+        Deletes the session row, which cascades to its agents and messages
+        (see migrations/001_init.sql). Per-namespace memory lives in a
+        separate table and is intentionally left untouched.
+        """
+        sid, context = _resolve_session(session_id, authorization)
+        try:
+            agent = get_agent(sid, context=context)
+            manager = getattr(agent, "session_manager", None)
+            deleter = getattr(manager, "delete_session", None)
+            if deleter is None:
+                raise HTTPException(
+                    status_code=501, detail="session manager does not support reset"
+                )
+            try:
+                deleter(sid)
+            except SessionException:
+                # Nothing stored yet (user never chatted) — treat as success.
+                logger.info("reset: no session to delete for %s", sid)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — surface as 500
+            logger.exception("reset failed for session_id=%s", sid)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        # Evict only this session's cached agent (it holds stale in-memory
+        # messages after the DB rows are gone). Don't call invalidate_agents()
+        # here — that clears every user's agent, punishing the whole process
+        # for one user's reset in cache_agents=True deployments.
+        agents.pop(sid, None)
+        return ResetResponse(session_id=sid, cleared=True)
 
     if prompt_store is not None:
 

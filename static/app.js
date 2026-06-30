@@ -11,6 +11,7 @@
 // fragment, and use it on every request.
 
 import { marked } from "https://esm.sh/marked@12";
+import DOMPurify from "https://esm.sh/dompurify@3";
 
 // When loaded inside the shim's drawer iframe, drop the standalone-page
 // chrome (centering, card border). CSS keys off `body.iframe-mode`.
@@ -36,6 +37,12 @@ const formEl = document.getElementById("form");
 const inputEl = document.getElementById("input");
 const btnEl = formEl.querySelector("button");
 const userEl = document.getElementById("user");
+const newChatEl = document.getElementById("new-chat");
+
+// Roughly how many prior turns to restore when the chat opens. We ask the
+// backend for 2x as many text *messages* (one exchange ≈ a user + an assistant
+// message), so a turn with multiple assistant bubbles counts as more than one.
+const HISTORY_TURNS = 10;
 
 const api = (path) => path; // same origin
 
@@ -81,6 +88,39 @@ function append(kind, text) {
     return div;
 }
 
+// Render a (possibly partial) markdown buffer to sanitized HTML. Streaming a
+// partial markdown document through marked is resilient — unclosed tokens
+// render as plain text until the closer arrives; on a hard parse error we fall
+// back to escaped text with <br> for newlines.
+//
+// Output is always run through DOMPurify before it reaches innerHTML. The
+// content is model-authored and can echo tool output (web search, recipe
+// names), and history persists it — so an injected <img onerror=…> would
+// otherwise re-fire on every open. ADD_ATTR keeps our new-tab link attrs.
+function mdToHtml(buf) {
+    let html;
+    try {
+        html = marked.parse(buf);
+    } catch (err) {
+        console.warn("[chat] marked threw on buffer", err);
+        const esc = buf
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        html = esc.replace(/\n/g, "<br>");
+    }
+    return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel"] });
+}
+
+// Append a finished agent message rendered as markdown (used for replaying
+// history; live streaming renders incrementally in send()).
+function appendAgentMarkdown(text) {
+    const div = append("agent markdown", "");
+    div.innerHTML = mdToHtml(text);
+    logEl.scrollTop = logEl.scrollHeight;
+    return div;
+}
+
 async function showWhoami(token) {
     try {
         const r = await fetch(api("/api/health"));
@@ -91,8 +131,16 @@ async function showWhoami(token) {
     }
 }
 
+// Lock the controls while a turn is streaming. Disabling "New" too prevents a
+// reset from racing an in-flight turn (whose create_message would re-persist
+// the conversation we just deleted).
+function setBusy(busy) {
+    btnEl.disabled = busy;
+    newChatEl.disabled = busy;
+}
+
 async function send(message, token) {
-    btnEl.disabled = true;
+    setBusy(true);
     append("user", message);
     // Agent message: accumulate plain-text chunks in markdownBuf, re-render
     // the whole buffer as HTML on each update. Streaming a partial markdown
@@ -116,7 +164,7 @@ async function send(message, token) {
     });
     if (!resp.ok) {
         append("err", `${resp.status}: ${await resp.text()}`);
-        btnEl.disabled = false;
+        setBusy(false);
         return;
     }
 
@@ -155,21 +203,7 @@ async function send(message, token) {
                     markdownBuf = "";
                 }
                 markdownBuf += data;
-                let html;
-                try {
-                    html = marked.parse(markdownBuf);
-                } catch (err) {
-                    console.warn("[chat] marked threw on partial buffer", err);
-                    // Preserve newlines as <br> so the fallback stays
-                    // readable (CSS sets white-space: normal on markdown
-                    // bubbles, which otherwise collapses them to spaces).
-                    const esc = markdownBuf
-                        .replace(/&/g, "&amp;")
-                        .replace(/</g, "&lt;")
-                        .replace(/>/g, "&gt;");
-                    html = esc.replace(/\n/g, "<br>");
-                }
-                agentMsg.innerHTML = html;
+                agentMsg.innerHTML = mdToHtml(markdownBuf);
                 logEl.scrollTop = logEl.scrollHeight;
             } else if (event === "thinking") {
                 append("think", data);
@@ -185,7 +219,7 @@ async function send(message, token) {
             }
         }
     }
-    btnEl.disabled = false;
+    setBusy(false);
     inputEl.focus();
 }
 
@@ -221,6 +255,54 @@ formEl.addEventListener("submit", async (e) => {
     await doSend();
 });
 
+// Replay recent turns into the window when the chat opens. The model already
+// has this context server-side every turn; this just shows it to the user.
+async function loadHistory(token) {
+    try {
+        const resp = await fetch(api(`/chat/history?limit=${HISTORY_TURNS * 2}`), {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) {
+            console.warn("[chat] history fetch failed", resp.status);
+            return;
+        }
+        const { turns } = await resp.json();
+        for (const turn of turns ?? []) {
+            if (turn.role === "user") append("user", turn.text);
+            else if (turn.role === "assistant") appendAgentMarkdown(turn.text);
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+    } catch (err) {
+        console.warn("[chat] history load errored", err);
+    }
+}
+
+// Clear context + start fresh: wipe the server-side session, then the window.
+async function newChat() {
+    const token = getToken();
+    if (!token) return;
+    newChatEl.disabled = true;
+    try {
+        const resp = await fetch(api("/chat/reset"), {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) {
+            append("err", `Couldn't start a new chat (${resp.status}).`);
+            return;
+        }
+        logEl.replaceChildren();
+        append("sys", "Started a new chat — Chef Rex's memory of this conversation is cleared.");
+        inputEl.focus();
+    } catch (err) {
+        append("err", `Couldn't start a new chat: ${err}`);
+    } finally {
+        newChatEl.disabled = false;
+    }
+}
+
+newChatEl.addEventListener("click", newChat);
+
 const t = getToken();
 if (!t) {
     append(
@@ -229,5 +311,6 @@ if (!t) {
     );
 } else {
     showWhoami(t);
+    loadHistory(t);
     inputEl.focus();
 }
