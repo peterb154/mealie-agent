@@ -46,6 +46,7 @@ Built on [strands-pg](https://github.com/peterb154/strands-pgsql-agent-framework
 │ mealie-agent.epetersons.com  (this agent, CT 114,           │
 │                               192.168.0.24)                 │
 │   ├── FastAPI `/chat` + `/chat/stream` (SSE)                │
+│   │   plus `/chat/history` (replay) + `/chat/reset` (wipe)  │
 │   ├── auth_verifier introspects the fragment-handoff JWT    │
 │   │   against Mealie's /api/users/self                      │
 │   ├── Local Postgres mirror of 5,400+ recipes (pgvector)    │
