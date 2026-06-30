@@ -11,6 +11,7 @@
 // fragment, and use it on every request.
 
 import { marked } from "https://esm.sh/marked@12";
+import DOMPurify from "https://esm.sh/dompurify@3";
 
 // When loaded inside the shim's drawer iframe, drop the standalone-page
 // chrome (centering, card border). CSS keys off `body.iframe-mode`.
@@ -38,8 +39,9 @@ const btnEl = formEl.querySelector("button");
 const userEl = document.getElementById("user");
 const newChatEl = document.getElementById("new-chat");
 
-// How many prior turns to restore when the chat opens. Each turn is a
-// user+assistant pair, so we ask the backend for 2x that many messages.
+// Roughly how many prior turns to restore when the chat opens. We ask the
+// backend for 2x as many text *messages* (one exchange ≈ a user + an assistant
+// message), so a turn with multiple assistant bubbles counts as more than one.
 const HISTORY_TURNS = 10;
 
 const api = (path) => path; // same origin
@@ -86,21 +88,28 @@ function append(kind, text) {
     return div;
 }
 
-// Render a (possibly partial) markdown buffer to HTML. Streaming a partial
-// markdown document through marked is resilient — unclosed tokens render as
-// plain text until the closer arrives; on a hard parse error we fall back to
-// escaped text with <br> for newlines.
+// Render a (possibly partial) markdown buffer to sanitized HTML. Streaming a
+// partial markdown document through marked is resilient — unclosed tokens
+// render as plain text until the closer arrives; on a hard parse error we fall
+// back to escaped text with <br> for newlines.
+//
+// Output is always run through DOMPurify before it reaches innerHTML. The
+// content is model-authored and can echo tool output (web search, recipe
+// names), and history persists it — so an injected <img onerror=…> would
+// otherwise re-fire on every open. ADD_ATTR keeps our new-tab link attrs.
 function mdToHtml(buf) {
+    let html;
     try {
-        return marked.parse(buf);
+        html = marked.parse(buf);
     } catch (err) {
         console.warn("[chat] marked threw on buffer", err);
         const esc = buf
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
-        return esc.replace(/\n/g, "<br>");
+        html = esc.replace(/\n/g, "<br>");
     }
+    return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel"] });
 }
 
 // Append a finished agent message rendered as markdown (used for replaying
@@ -122,8 +131,16 @@ async function showWhoami(token) {
     }
 }
 
+// Lock the controls while a turn is streaming. Disabling "New" too prevents a
+// reset from racing an in-flight turn (whose create_message would re-persist
+// the conversation we just deleted).
+function setBusy(busy) {
+    btnEl.disabled = busy;
+    newChatEl.disabled = busy;
+}
+
 async function send(message, token) {
-    btnEl.disabled = true;
+    setBusy(true);
     append("user", message);
     // Agent message: accumulate plain-text chunks in markdownBuf, re-render
     // the whole buffer as HTML on each update. Streaming a partial markdown
@@ -147,7 +164,7 @@ async function send(message, token) {
     });
     if (!resp.ok) {
         append("err", `${resp.status}: ${await resp.text()}`);
-        btnEl.disabled = false;
+        setBusy(false);
         return;
     }
 
@@ -202,7 +219,7 @@ async function send(message, token) {
             }
         }
     }
-    btnEl.disabled = false;
+    setBusy(false);
     inputEl.focus();
 }
 

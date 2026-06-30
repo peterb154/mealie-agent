@@ -378,7 +378,11 @@ def make_app(
             logger.exception("reset failed for session_id=%s", sid)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        invalidate_agents()
+        # Evict only this session's cached agent (it holds stale in-memory
+        # messages after the DB rows are gone). Don't call invalidate_agents()
+        # here — that clears every user's agent, punishing the whole process
+        # for one user's reset in cache_agents=True deployments.
+        agents.pop(sid, None)
         return ResetResponse(session_id=sid, cleared=True)
 
     if prompt_store is not None:
