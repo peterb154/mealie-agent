@@ -98,6 +98,16 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
     )
 
 
+# MCP server for the mcp-gateway (claude.ai). Built only when a default
+# identity (MEALIE_API_TOKEN) and/or the shared secret (MCP_SHARED_SECRET,
+# implying gateway-forwarded multi-user identities) is configured. Its
+# lifespan must run inside the parent app's lifespan for the
+# streamable-http session manager to start.
+from mcp_server import build_mcp  # noqa: E402
+
+_mcp = build_mcp()
+_mcp_app = _mcp.http_app(path="/") if _mcp else None
+
 app = make_app(
     build_agent,
     title="mealie-agent",
@@ -109,7 +119,11 @@ app = make_app(
     # host's git checkout. Falls back to 'dev' outside of a built image.
     health_info=lambda: {"commit": os.environ.get("GIT_SHA", "dev")},
     health_path="/api/health",
+    lifespan=_mcp_app.lifespan if _mcp_app else None,
 )
+
+if _mcp_app is not None:
+    app.mount("/mcp", _mcp_app)
 
 # Static chat UI. Served at / (index.html) + /static/* for assets.
 from fastapi import Request  # noqa: E402
