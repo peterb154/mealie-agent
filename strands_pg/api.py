@@ -138,6 +138,7 @@ def make_app(
     auth_verifier: AuthVerifier | None = None,
     health_info: Callable[[], dict[str, Any]] | None = None,
     health_path: str = "/health",
+    lifespan: Any | None = None,
 ) -> FastAPI:
     """Build a FastAPI app exposing /health, /chat, and /prompts endpoints.
 
@@ -173,7 +174,10 @@ def make_app(
     and returns ``{session_id, email, user_id, group_id, household_id}``
     which build_agent uses for per-household memory namespacing.
     """
-    app = FastAPI(title=title)
+    # ``lifespan`` lets callers mount sub-apps that need their own startup
+    # (e.g. a FastMCP streamable-http app, whose session manager must be
+    # started inside the parent app's lifespan).
+    app = FastAPI(title=title, lifespan=lifespan)
     agents: dict[str, Any] = {}
 
     # Introspect once: does agent_factory accept context=? Most camping-db-era
