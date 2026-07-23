@@ -21,6 +21,7 @@ COPY migrations/   /app/migrations/
 
 # Your agent.
 COPY app.py       /app/
+COPY mcp_server.py /app/
 COPY tools/       /app/tools/
 COPY prompts/     /app/prompts/
 COPY scripts/     /app/scripts/
