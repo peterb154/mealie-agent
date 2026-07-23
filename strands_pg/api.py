@@ -361,7 +361,11 @@ def make_app(
         sid, context = _resolve_session(session_id, authorization)
         try:
             agent = get_agent(sid, context=context)
-            manager = getattr(agent, "session_manager", None)
+            # Strands' Agent stores the manager privately as _session_manager;
+            # check the public name first in case a future version exposes it.
+            manager = getattr(agent, "session_manager", None) or getattr(
+                agent, "_session_manager", None
+            )
             deleter = getattr(manager, "delete_session", None)
             if deleter is None:
                 raise HTTPException(
