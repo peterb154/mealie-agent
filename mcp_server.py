@@ -7,28 +7,35 @@ strands ``@tool`` factories; the original callables are recovered via
 Identity (multi-user): the gateway forwards the Cloudflare Access email as
 ``X-MCP-User`` on every request. That maps to a per-user Mealie API token
 in the ``mcp_user_tokens`` table; the token is introspected (lazily, cached
-per email) via the same ``verify_mealie_jwt`` the chat UI uses, so calls
-run under that user's Mealie RBAC and their memory namespaces resolve to
-the exact ``user:{email}`` / ``household:{id}`` namespaces Chef Rex reads.
-Requests without ``X-MCP-User`` fall back to the ``MEALIE_API_TOKEN``
-default identity. An unknown email is an error — never someone else's data.
+with a TTL per email) via the same ``verify_mealie_jwt`` the chat UI uses,
+so calls run under that user's Mealie RBAC and their memory namespaces
+resolve to the exact ``user:{email}`` / ``household:{id}`` namespaces Chef
+Rex reads. An unknown email is an error — never someone else's data.
 
-Security: when ``MCP_SHARED_SECRET`` is set, EVERY tool call must present
-it as ``X-MCP-Secret``. Identity determines what reads return, so reads
-are gated too — otherwise a LAN caller bypassing the gateway could spoof
-``X-MCP-User`` and read another user's meal plans. No-op when unset (dev).
+Security: when ``MCP_SHARED_SECRET`` is set (production), EVERY tool call
+must present it as ``X-MCP-Secret`` — identity determines what reads
+return, so reads are gated too — AND must carry ``X-MCP-User``. Every
+CF-authenticated caller has an email, so a secret-bearing request without
+one means the gateway stopped forwarding identity; erroring loudly beats
+silently falling back to somebody's default identity. The
+``MEALIE_API_TOKEN`` default identity only serves the no-secret (local
+dev / direct scripting) configuration.
 
-Provisioning a family member:
+Provisioning anyone — including the admin; gateway traffic never uses the
+default identity:
 1. They create an API token in Mealie (user settings → API tokens).
 2. ``INSERT INTO mcp_user_tokens (email, mealie_token) VALUES (lower('<cf-email>'), '<token>');``
 3. Their email goes in the CF Access policy; they add the connector in claude.ai.
+Token changes take effect within the cache TTL (10 min) — no restart needed.
 """
 
 from __future__ import annotations
 
 import functools
+import hmac
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -57,10 +64,17 @@ class _Identity:
     client: MealieClient
 
 
+# Re-resolve identities after this long, so token rotation/revocation in
+# mcp_user_tokens lands without a restart.
+_IDENTITY_TTL_SECONDS = 600.0
+
+
 def _db_token_lookup(email: str) -> str | None:
     with get_pool().connection() as conn, conn.cursor() as cur:
+        # lower() on the column too — don't let a mixed-case INSERT create a
+        # "not provisioned" mystery.
         cur.execute(
-            "SELECT mealie_token FROM mcp_user_tokens WHERE email = %s",
+            "SELECT mealie_token FROM mcp_user_tokens WHERE lower(email) = %s",
             (email.lower(),),
         )
         row = cur.fetchone()
@@ -86,9 +100,15 @@ def build_mcp(
         logger.info("neither MEALIE_API_TOKEN nor MCP_SHARED_SECRET set — MCP not mounted")
         return None
 
+    # Capture config at build time so each built server has fixed semantics
+    # (and tests can build differently-configured instances side by side).
+    secret = MCP_SHARED_SECRET
+    default_token = MEALIE_API_TOKEN
     store = memory_store  # PgMemoryStore is constructed lazily below (needs DSN)
     lookup = token_lookup or _db_token_lookup
-    identities: dict[str, _Identity] = {}  # keyed by lowercased email; "" = default
+    # keyed by lowercased email ("" = default identity); value expires so
+    # token rotation in mcp_user_tokens lands without a restart.
+    identities: dict[str, tuple[_Identity, float]] = {}
 
     def _get_store() -> Any:
         nonlocal store
@@ -105,19 +125,33 @@ def build_mcp(
         tool error (callers see why instead of a silent wrong-user result).
         """
         headers = get_http_headers(include={"x-mcp-user", "x-mcp-secret"})
-        if MCP_SHARED_SECRET and headers.get("x-mcp-secret", "") != MCP_SHARED_SECRET:
+        if secret and not hmac.compare_digest(headers.get("x-mcp-secret", ""), secret):
             raise PermissionError("mealie tools require a valid X-MCP-Secret header")
 
         email = (headers.get("x-mcp-user") or "").strip().lower()
-        if ident := identities.get(email):
-            return ident
+        if secret and not email:
+            # Every CF-authenticated caller has an email, so a secret-bearing
+            # request without one means the gateway stopped forwarding
+            # identity. Fail loudly — silently serving a default identity
+            # would hand one user another user's data.
+            raise PermissionError(
+                "X-MCP-User header required when MCP_SHARED_SECRET is set — "
+                "if this request came through the gateway, identity "
+                "forwarding is broken"
+            )
+
+        now = time.monotonic()
+        cached = identities.get(email)
+        if cached and cached[1] > now:
+            return cached[0]
 
         if not email:
-            if not MEALIE_API_TOKEN:
+            # Only reachable with no secret configured (local dev / scripts).
+            if not default_token:
                 raise PermissionError(
                     "no X-MCP-User header and no default MEALIE_API_TOKEN configured"
                 )
-            token = MEALIE_API_TOKEN
+            token = default_token
         else:
             token = lookup(email)
             if token is None:
@@ -137,7 +171,7 @@ def build_mcp(
             household_id=context.get("household_id") or "default",
             client=MealieClient(MEALIE_URL, token),
         )
-        identities[email] = ident
+        identities[email] = (ident, now + _IDENTITY_TTL_SECONDS)
         logger.info(
             "MCP identity resolved: %s (household %s)", ident.email, ident.household_id
         )

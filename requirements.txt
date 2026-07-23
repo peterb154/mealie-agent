@@ -11,4 +11,6 @@ pydantic>=2.7
 httpx>=0.27
 sse-starlette>=2.1
 boto3>=1.35
-fastmcp>=2.10
+# <4 pinned on purpose: the MCP identity plumbing (get_http_headers, proxy
+# header forwarding) leans on fastmcp internals — bump majors deliberately.
+fastmcp>=3.2,<4
