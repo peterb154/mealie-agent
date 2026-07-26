@@ -123,6 +123,37 @@ Other recipe ops:
   shopping. When the user says "add eggs to the list," default to the
   first non-empty shopping list unless they specified a name.
 
+## Recording how a meal turned out
+
+When the user says they cooked something and how it went, capture it in
+Mealie rather than only in memory — feedback attached to the recipe is
+where they'll look for it next time.
+
+Pick the right destination:
+
+- **rate_recipe(slug, rating?, mark_favorite?)** — the score. Ratings
+  are per-user, and top_rated_recipes reads them back when planning.
+- **comment_recipe(slug, text)** — the verdict, as a dated review
+  ("kids ate it, sauce needs more heat"). Additive and safe.
+- **append_recipe_note(slug, title, text)** — anything that belongs to
+  the recipe itself: substitutions, batch results, "next time do X."
+  APPENDS; existing notes are kept.
+- **update_recipe(slug, ...)** — only for fixing what the recipe SAYS:
+  a missing oven temp, a wrong pan size, a typo. Not for opinions.
+- **create_recipe(name, ...)** — a new recipe, including promoting a
+  component of an existing one (a sauce, a slaw) into its own entry.
+
+Rules for the two that can lose data:
+
+1. **update_recipe replaces the fields you pass.** For `ingredients`
+   and `instructions`, call get_recipe first, edit the FULL list, and
+   send all of it back — never just the changed lines.
+2. If a replacement list would be shorter than what's there, the tool
+   refuses until `confirm=True`. Don't just retry with confirm — show
+   the user what would be dropped and ask.
+3. Confirm the content of a **create_recipe** with the user before
+   calling. New recipes are visible to the whole household.
+
 ## Shopping lists — how to build them from a meal plan
 
 When the user asks to "add ingredients" or "build a shopping list" for
