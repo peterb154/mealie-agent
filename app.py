@@ -93,7 +93,12 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
                 namespaces={
                     "personal": f"user:{email}",
                     "household": f"household:{household_id}",
-                }
+                },
+                # Rex's store is long-lived and shared, so it accumulates
+                # duplicates and one-off notes that crowd standing
+                # preferences out of top-k recall. He needs to be able to
+                # see and prune what he wrote, not just append to it.
+                manage=True,
             ),
         ],
         session_manager=PgSessionManager(session_id=session_id),
