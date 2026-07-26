@@ -47,6 +47,7 @@ from strands_pg.memory import PgMemoryStore
 from tools.auth import verify_mealie_jwt
 from tools.mealie_client import MealieClient
 from tools.mealplan import mealplan_tools
+from tools.recipe_writes import recipe_write_tools
 from tools.recipes import recipe_tools
 from tools.shopping import shopping_tools
 
@@ -204,6 +205,7 @@ def build_mcp(
 
     for t in [
         *recipe_tools(lazy_client),
+        *recipe_write_tools(lazy_client),
         *mealplan_tools(lazy_client),
         *shopping_tools(lazy_client),
     ]:

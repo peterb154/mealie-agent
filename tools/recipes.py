@@ -26,7 +26,7 @@ _MEALIE_URL = os.environ.get("MEALIE_URL", "").rstrip("/")
 _MEALIE_GROUP_SLUG = os.environ.get("MEALIE_GROUP_SLUG", "home")
 
 
-def _recipe_url(slug: str) -> str:
+def recipe_url(slug: str) -> str:
     """Mealie's frontend recipe page URL. The agent surfaces these so the
     user can click through to the full recipe in Mealie."""
     if not _MEALIE_URL:
@@ -46,6 +46,10 @@ _RECIPE_FIELDS = (
     "tags",
     "recipeIngredient",
     "recipeInstructions",
+    # Notes carry corrections and batch history now that they're writable
+    # (append_recipe_note) — the agent has to be able to read them back
+    # before appending, or it'll repeat itself.
+    "notes",
     "totalTime",
     "prepTime",
     "cookTime",
@@ -94,7 +98,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         def _fmt(slug: str, name: str, snippet: str, rating: float | None) -> str:
             star = f" ⭐ {rating}/5" if rating and rating > 0 else ""
             return (
-                f"- **[{name}]({_recipe_url(slug)})**{star} — "
+                f"- **[{name}]({recipe_url(slug)})**{star} — "
                 f"{snippet[:120].strip()}  \n  `slug: {slug}`"
             )
         return "\n".join(_fmt(s, n, sn, r) for s, n, sn, r in rows)
@@ -126,7 +130,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             r = it.get("rating")
             star = f" ⭐ {r}/5" if isinstance(r, (int, float)) and r > 0 else ""
             return (
-                f"- **[{it['name']}]({_recipe_url(it['slug'])})**{star}  \n"
+                f"- **[{it['name']}]({recipe_url(it['slug'])})**{star}  \n"
                 f"  `slug: {it['slug']}`"
             )
         return "\n".join(_fmt(it) for it in items[:15])
@@ -172,7 +176,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             desc = desc + "…" if len(it.get("description") or "") > 100 else desc
             suffix = f" — {desc}" if desc else ""
             lines.append(
-                f"- **[{it['name']}]({_recipe_url(it['slug'])})**{star}{heart}{suffix}  \n"
+                f"- **[{it['name']}]({recipe_url(it['slug'])})**{star}{heart}{suffix}  \n"
                 f"  `slug: {it['slug']}`"
             )
         return "\n".join(lines)
@@ -212,10 +216,11 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         trimmed = _trim_recipe(r)
         ingredients = trimmed.pop("recipeIngredient", []) or []
         steps = trimmed.pop("recipeInstructions", []) or []
+        notes = trimmed.pop("notes", []) or []
 
         out: list[str] = []
         name = trimmed.get("name", slug)
-        out.append(f"# [{name}]({_recipe_url(slug)})")
+        out.append(f"# [{name}]({recipe_url(slug)})")
         if desc := trimmed.get("description"):
             out.append(desc)
         if trimmed.get("totalTime"):
@@ -229,6 +234,12 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             out.append("\n## Instructions")
             for i, s in enumerate(steps, 1):
                 out.append(f"{i}. {s.get('text', '').strip()}")
+        if notes:
+            out.append("\n## Notes")
+            for n in notes:
+                title = (n.get("title") or "").strip()
+                out.append(f"- **{title}** — {n.get('text', '').strip()}" if title
+                           else f"- {n.get('text', '').strip()}")
         return "\n".join(out)
 
     return [
