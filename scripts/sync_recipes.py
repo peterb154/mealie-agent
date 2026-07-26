@@ -9,6 +9,13 @@ Idempotent: uses ``INSERT ... ON CONFLICT DO UPDATE`` keyed on
 ``mealie_recipe_id``, so re-runs just refresh rows whose embedding
 is stale.
 
+Also prunes: rows whose recipe no longer exists in Mealie are deleted,
+because upsert alone would leave them in the vector index forever and
+``search_recipes`` would keep returning slugs that 404. Pass
+``--no-prune`` to skip, ``--force-prune`` to allow a prune that would
+remove more than 10% of the mirror (the guard exists because a
+truncated Mealie drain looks identical to a mass deletion).
+
 Works from inside the agent container:
     docker compose exec agent python /app/scripts/sync_recipes.py
 """
@@ -85,6 +92,80 @@ def _upsert(cur: psycopg.Cursor, row: dict) -> None:
     )
 
 
+def _live_recipe_ids(mc: MealieClient) -> set[str]:
+    """Every recipe id currently in Mealie.
+
+    Id-only drain — no detail fetch, no embedding — so it stays cheap
+    enough to run on every sync, including incremental ones.
+
+    Raises rather than returning a partial set: a truncated drain is
+    indistinguishable from a mass deletion, and the caller uses this to
+    decide what to delete.
+    """
+    ids: set[str] = set()
+    page = 1
+    while True:
+        body = mc.list_recipes(page=page, per_page=100)
+        items = body.get("items") or []
+        ids |= {i["id"] for i in items if i.get("id")}
+        total_pages = body.get("total_pages") or body.get("totalPages") or 1
+        if page >= total_pages or not items:
+            break
+        page += 1
+    return ids
+
+
+def _prune(
+    conn: psycopg.Connection,
+    live_ids: set[str],
+    *,
+    max_delete_ratio: float = 0.10,
+    force: bool = False,
+) -> int:
+    """Drop mirror rows for recipes that no longer exist in Mealie.
+
+    The sync is otherwise upsert-only, so a deleted recipe would sit in
+    the vector index forever and ``search_recipes`` would keep offering
+    a slug that ``get_recipe`` can't resolve.
+
+    Guarded by a ratio check: an incomplete drain looks exactly like a
+    bulk deletion, and acting on one would wipe the mirror. A real bulk
+    delete just needs --force-prune.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT mealie_recipe_id, slug FROM recipe_embeddings")
+        rows = cur.fetchall()
+    if not rows:
+        return 0
+    orphans = [(str(rid), slug) for rid, slug in rows if str(rid) not in live_ids]
+    if not orphans:
+        log.info("prune: %d mirror rows, all still live", len(rows))
+        return 0
+
+    ratio = len(orphans) / len(rows)
+    if ratio > max_delete_ratio and not force:
+        log.error(
+            "prune: REFUSING to delete %d/%d rows (%.1f%%) — over the %.0f%% guard. "
+            "That usually means the Mealie drain was incomplete, not that %d "
+            "recipes were deleted. Re-run with --force-prune if it really was.",
+            len(orphans), len(rows), ratio * 100, max_delete_ratio * 100, len(orphans),
+        )
+        return 0
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM recipe_embeddings WHERE mealie_recipe_id = ANY(%s)",
+            ([rid for rid, _ in orphans],),
+        )
+    conn.commit()
+    for _, slug in orphans[:20]:
+        log.info("prune: removed %s", slug)
+    if len(orphans) > 20:
+        log.info("prune: ... and %d more", len(orphans) - 20)
+    log.info("prune: removed %d orphaned row(s)", len(orphans))
+    return len(orphans)
+
+
 def _drain_recipes(mc: MealieClient, updated_after: str | None) -> list[dict]:
     """Walk Mealie pagination until we run out of items."""
     all_items: list[dict] = []
@@ -109,6 +190,16 @@ def main() -> int:
         type=float,
         default=0.1,
         help="Seconds to sleep between recipes (throttle Bedrock).",
+    )
+    ap.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="Skip removing mirror rows for recipes deleted in Mealie.",
+    )
+    ap.add_argument(
+        "--force-prune",
+        action="store_true",
+        help="Prune even when it would remove >10%% of the mirror.",
     )
     args = ap.parse_args()
 
@@ -186,6 +277,18 @@ def main() -> int:
             time.sleep(args.batch_sleep)
         conn.commit()
         log.info("sync complete — %d recipes embedded", done)
+
+        # Prune last: embedding work is the expensive part, and a prune
+        # failure shouldn't cost the sync that already succeeded.
+        if args.no_prune:
+            log.info("prune: skipped (--no-prune)")
+        else:
+            try:
+                live = _live_recipe_ids(mc)
+                log.info("prune: mealie reports %d live recipes", len(live))
+                _prune(conn, live, force=args.force_prune)
+            except Exception:  # noqa: BLE001 — never fail a good sync over this
+                log.exception("prune failed — mirror may contain deleted recipes")
     return 0
 
 
