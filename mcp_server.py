@@ -220,13 +220,33 @@ def build_mcp(
     # the per-request identity.
     def _remember(namespace: str, text: str) -> str:
         mid = _get_store().add(text, namespace=namespace)
-        return f"Saved memory #{mid}"
+        # Return the id so the caller can cite or undo what it just wrote.
+        return f"Saved note [{mid}]. Use forget_note({mid}) to remove it."
 
     def _recall(namespace: str, query: str, k: int) -> str:
         hits = _get_store().search(query, k=k, namespace=namespace)
         if not hits:
             return "No matches."
         return "\n".join(f"- [{h.id}] {h.text}" for h in hits)
+
+    def _namespace_for(scope: str, ident: _Identity) -> str:
+        """Map the tool's scope argument onto a storage namespace."""
+        s = (scope or "").strip().lower()
+        if s == "personal":
+            return f"user:{ident.email}"
+        if s == "household":
+            return f"household:{ident.household_id}"
+        raise ValueError(f"scope must be 'personal' or 'household', got {scope!r}")
+
+    def _list_notes(namespace: str, limit: int, offset: int) -> str:
+        rows = _get_store().list(namespace=namespace, limit=limit, offset=offset)
+        if not rows:
+            return "No notes."
+        lines = []
+        for h in rows:
+            when = h.created_at.strftime("%Y-%m-%d") if h.created_at else "unknown date"
+            lines.append(f"- [{h.id}] ({when}) {h.text}")
+        return "\n".join(lines)
 
     @mcp.tool(name="mealie_remember_personal")
     def remember_personal(text: str) -> str:
@@ -251,5 +271,65 @@ def build_mcp(
         """Search the household's durable notes by meaning. Returns top-k hits."""
         ident = _resolve()
         return _recall(f"household:{ident.household_id}", query, k)
+
+    @mcp.tool(name="mealie_list_notes")
+    def list_notes(scope: str = "household", limit: int = 50, offset: int = 0) -> str:
+        """List durable notes in full, newest first, with ids and dates.
+
+        Unlike recall_*, this is exhaustive rather than top-k by
+        similarity — it's the only way to audit the store, spot
+        duplicates, or find notes worth pruning. Call it before saving
+        something you suspect is already there.
+
+        The store is for STANDING facts: allergies, dislikes, household
+        rules ('we double every pasta recipe'), preferred store. It is
+        NOT for how one meal turned out — that belongs on the recipe via
+        append_recipe_note or comment_recipe, where it stays attached to
+        the thing it describes. Per-batch notes here crowd out real
+        preferences, because recall_* returns top-k and a cluster of
+        notes about one dinner will dominate any nearby query.
+
+        Args:
+            scope: 'household' (shared) or 'personal' (just you).
+            limit: Maximum notes to return (default 50).
+            offset: Skip this many for paging through a large store.
+        """
+        ident = _resolve()
+        try:
+            ns = _namespace_for(scope, ident)
+        except ValueError as exc:
+            return f"(error: {exc})"
+        return _list_notes(ns, limit, offset)
+
+    @mcp.tool(name="mealie_forget_note")
+    def forget_note(note_id: int, scope: str = "household") -> str:
+        """Delete one durable note by id. Permanent.
+
+        Get ids from list_notes or recall_*. Deleting drops the note and
+        its embedding together, so it stops coming back from recall_*
+        immediately.
+
+        The delete is scoped to YOUR notes in the given scope — an id
+        belonging to someone else, or in the other scope, reports
+        not_found and changes nothing. If you get not_found, re-check
+        the id with list_notes rather than guessing.
+
+        Args:
+            note_id: Numeric id shown in brackets, e.g. 23 for '[23]'.
+            scope: 'household' or 'personal' — must match where the note
+                actually lives.
+        """
+        ident = _resolve()
+        try:
+            ns = _namespace_for(scope, ident)
+        except ValueError as exc:
+            return f"(error: {exc})"
+        # Namespace-scoped: ids are sequential and visible to every
+        # caller, so an unscoped delete would let one user remove
+        # another user's notes by guessing an integer.
+        removed = _get_store().delete(note_id, namespace=ns)
+        if not removed:
+            return f"note_id={note_id} status=not_found (no such note in {scope} scope)"
+        return f"note_id={note_id} status=deleted"
 
     return mcp

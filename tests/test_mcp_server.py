@@ -12,6 +12,8 @@ import os
 import socket
 import threading
 import time
+from datetime import datetime
+from types import SimpleNamespace
 
 # Env BEFORE importing mcp_server (module reads env at import).
 os.environ["MEALIE_API_TOKEN"] = "tok-brian"
@@ -76,15 +78,39 @@ def _mock_mealie() -> FastAPI:
 
 
 class StubMemoryStore:
+    """In-memory stand-in. Enforces namespace scoping on delete exactly
+    like the real Postgres store, so the isolation test is meaningful."""
+
     def __init__(self):
         self.added = []
+        self.rows = {}  # id -> (namespace, text)
+        self._next = 1
 
     def add(self, text, namespace=None, **kw):
         self.added.append((namespace, text))
-        return len(self.added)
+        mid = self._next
+        self._next += 1
+        self.rows[mid] = (namespace, text)
+        return mid
 
     def search(self, query, k=5, namespace=None, **kw):
         return []
+
+    def list(self, namespace=None, limit=100, offset=0, **kw):
+        hits = [
+            SimpleNamespace(id=i, namespace=ns, text=t, metadata={},
+                            distance=0.0, created_at=datetime(2026, 7, 26))
+            for i, (ns, t) in sorted(self.rows.items(), reverse=True)
+            if ns == namespace
+        ]
+        return hits[offset : offset + limit]
+
+    def delete(self, memory_id, namespace=None):
+        row = self.rows.get(memory_id)
+        if row is None or (namespace is not None and row[0] != namespace):
+            return False
+        del self.rows[memory_id]
+        return True
 
 
 def _serve(app, port):
@@ -174,10 +200,11 @@ def test_tool_listing(urls):
             return {t.name for t in await c.list_tools()}
 
     tools = asyncio.run(go())
-    assert len(tools) == 29
+    assert len(tools) == 31
     assert all(t.startswith("mealie_") for t in tools)
     assert {"mealie_search_recipes", "mealie_remember_personal", "mealie_recall_household"} <= tools
     assert {"mealie_rate_recipe", "mealie_comment_recipe", "mealie_update_recipe"} <= tools
+    assert {"mealie_list_notes", "mealie_forget_note"} <= tools
 
 
 def test_forwarded_identity_uses_that_users_token(urls):
@@ -213,6 +240,68 @@ def test_memory_namespaces_follow_identity(urls):
     _call(secret_url, "mealie_remember_household", {"text": "taco tuesday"},
           secret="sekrit", user="amy@example.com")
     assert STUB_STORE.added[-1] == ("household:h-amy", "taco tuesday")
+
+
+def _text(result):
+    return result.content[0].text
+
+
+def test_list_notes_is_scoped_and_shows_ids_and_dates(urls):
+    secret_url, _ = urls
+    _call(secret_url, "mealie_remember_household", {"text": "we double every pasta recipe"},
+          secret="sekrit", user="brian@example.com")
+    out = _text(_call(secret_url, "mealie_list_notes", {"scope": "household"},
+                      secret="sekrit", user="brian@example.com"))
+    assert "we double every pasta recipe" in out
+    assert "2026-07-26" in out
+
+    # Amy's household is different — she must not see it.
+    amy = _text(_call(secret_url, "mealie_list_notes", {"scope": "household"},
+                      secret="sekrit", user="amy@example.com"))
+    assert "pasta" not in amy
+
+
+def test_forget_note_cannot_reach_another_users_notes(urls):
+    """Note ids are sequential and printed to every caller, so an
+    unscoped delete would let anyone remove anyone's notes by guessing."""
+    secret_url, _ = urls
+    saved = _text(_call(secret_url, "mealie_remember_personal", {"text": "brian hates cilantro"},
+                        secret="sekrit", user="brian@example.com"))
+    note_id = int(saved.split("[")[1].split("]")[0])
+
+    # Amy, with the exact id, in the same scope name.
+    stolen = _text(_call(secret_url, "mealie_forget_note", {"note_id": note_id, "scope": "personal"},
+                         secret="sekrit", user="amy@example.com"))
+    assert "not_found" in stolen
+    assert STUB_STORE.rows[note_id][1] == "brian hates cilantro"  # still there
+
+    # Right scope, wrong owner's scope name — also refused.
+    wrong_scope = _text(_call(secret_url, "mealie_forget_note",
+                              {"note_id": note_id, "scope": "household"},
+                              secret="sekrit", user="brian@example.com"))
+    assert "not_found" in wrong_scope
+    assert note_id in STUB_STORE.rows
+
+    # The owner, in the right scope, succeeds.
+    ok = _text(_call(secret_url, "mealie_forget_note", {"note_id": note_id, "scope": "personal"},
+                     secret="sekrit", user="brian@example.com"))
+    assert "deleted" in ok
+    assert note_id not in STUB_STORE.rows
+
+
+def test_bad_scope_is_rejected(urls):
+    secret_url, _ = urls
+    out = _text(_call(secret_url, "mealie_list_notes", {"scope": "everyone"},
+                      secret="sekrit", user="brian@example.com"))
+    assert "personal" in out and "household" in out
+
+
+def test_remember_returns_the_new_note_id(urls):
+    secret_url, _ = urls
+    out = _text(_call(secret_url, "mealie_remember_personal", {"text": "no bottom-feeder fish"},
+                      secret="sekrit", user="brian@example.com"))
+    assert "forget_note(" in out
+    assert int(out.split("[")[1].split("]")[0]) in STUB_STORE.rows
 
 
 def test_secret_mode_requires_identity_header(urls):

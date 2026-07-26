@@ -18,6 +18,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from psycopg.types.json import Jsonb
@@ -38,6 +39,7 @@ class MemoryHit:
     text: str
     metadata: dict[str, Any]
     distance: float  # cosine distance in [0, 2]; lower = closer
+    created_at: datetime | None = None  # populated by list(); None from search()
 
 
 class PgMemoryStore:
@@ -112,10 +114,26 @@ class PgMemoryStore:
             for r in rows
         ]
 
-    def delete(self, memory_id: int) -> bool:
-        """Delete by id. Returns True if a row was removed."""
+    def delete(self, memory_id: int, namespace: str | None = None) -> bool:
+        """Delete by id. Returns True if a row was removed.
+
+        ALWAYS pass ``namespace`` in a multi-tenant deployment. Ids are
+        small sequential integers and are routinely shown to callers
+        (search results carry them), so an unscoped delete lets anyone
+        who can guess an integer remove another tenant's memories.
+        Scoping turns that into a no-op that returns False.
+
+        ``namespace=None`` deletes by id alone, which is only safe when
+        the whole store belongs to one tenant.
+        """
         with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM memories WHERE id = %s", (memory_id,))
+            if namespace is None:
+                cur.execute("DELETE FROM memories WHERE id = %s", (memory_id,))
+            else:
+                cur.execute(
+                    "DELETE FROM memories WHERE id = %s AND namespace = %s",
+                    (memory_id, namespace),
+                )
             conn.commit()
             return cur.rowcount > 0
 
@@ -123,19 +141,25 @@ class PgMemoryStore:
         self,
         namespace: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryHit]:
-        """Most-recent-first list. Convenience; not embedded."""
+        """Most-recent-first list. Convenience; not embedded.
+
+        Unlike ``search``, this is exhaustive within the namespace — it's
+        the primitive for auditing, deduping, and pruning a store, none
+        of which a top-k semantic query can do.
+        """
         ns = namespace or self._default_namespace
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, namespace, text, metadata
+                SELECT id, namespace, text, metadata, created_at
                 FROM memories
                 WHERE namespace = %s
-                ORDER BY created_at DESC
-                LIMIT %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s OFFSET %s
                 """,
-                (ns, limit),
+                (ns, limit, offset),
             )
             rows = cur.fetchall()
         return [
@@ -145,6 +169,7 @@ class PgMemoryStore:
                 text=r[2],
                 metadata=r[3] if isinstance(r[3], dict) else {},
                 distance=0.0,
+                created_at=r[4],
             )
             for r in rows
         ]
