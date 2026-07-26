@@ -76,6 +76,54 @@ def _merge(
     return out
 
 
+def _structured_ingredient(parsed: dict[str, Any], line: str) -> dict[str, Any] | None:
+    """Parser output as a writable ingredient, or None if it isn't safe.
+
+    Mealie returns 500 when a PATCH carries a food or unit without an id
+    (a create-shape), and the parser emits exactly that for anything it
+    can't resolve against the instance's existing foods/units. So the id
+    is the gate — NOT the confidence score, which happily reports 0.97
+    on total nonsense."""
+    ing = parsed.get("ingredient") or {}
+    food = ing.get("food") or None
+    unit = ing.get("unit") or None
+    if not (food and food.get("id")):
+        return None
+    if unit and not unit.get("id"):
+        return None
+    return {
+        "quantity": ing.get("quantity") or 0,
+        "unit": unit,
+        "food": food,
+        "note": ing.get("note") or "",
+        "originalText": line,
+    }
+
+
+def _reparse(client: MealieClient, merged: list[dict[str, Any]],
+             existing: list[dict[str, Any]], lines: list[str]) -> list[dict[str, Any]]:
+    """Try to re-derive food/unit/quantity for the entries we rebuilt.
+
+    A rebuilt entry is plain text, which costs Mealie's shopping-list
+    and scaling features. The parser can put the structure back. Entries
+    that round-tripped unchanged are left strictly alone — they already
+    hold the real thing. Best-effort: any failure keeps the plain notes
+    rather than failing the edit."""
+    idx = [i for i, m in enumerate(merged) if i >= len(existing) or m is not existing[i]]
+    if not idx:
+        return merged
+    try:
+        parsed = client.parse_ingredients([lines[i] for i in idx])
+    except Exception:  # noqa: BLE001 — structure is a bonus, not the job
+        logger.exception("ingredient re-parse failed; keeping plain notes")
+        return merged
+    out = list(merged)
+    for slot, p in zip(idx, parsed):
+        if (structured := _structured_ingredient(p, lines[slot])) is not None:
+            out[slot] = structured
+    return out
+
+
 def _clean(lines: list[str] | None) -> list[str]:
     return [s.strip() for s in (lines or []) if s and s.strip()]
 
@@ -239,7 +287,9 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
         if description.strip():
             fields["description"] = description.strip()
         if ings := _clean(ingredients):
-            fields["recipeIngredient"] = [_ingredient(i) for i in ings]
+            fields["recipeIngredient"] = _reparse(
+                user_client, [_ingredient(i) for i in ings], [], ings
+            )
         if steps := _clean(instructions):
             fields["recipeInstructions"] = [_step(s) for s in steps]
         if recipe_yield.strip():
@@ -358,6 +408,8 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
             if len(incoming) < len(existing):
                 shrinking.append(f"{key} {len(existing)} → {len(incoming)}")
             merged = _merge(existing, incoming, build, text_of)
+            if key == "recipeIngredient":
+                merged = _reparse(user_client, merged, existing, incoming)
             fields[key] = merged
             rewritten = sum(1 for i, m in enumerate(merged) if i >= len(existing) or m is not existing[i])
             diff.append(f"- {key}: {len(incoming)} item(s), {rewritten} changed")
