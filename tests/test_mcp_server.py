@@ -112,6 +112,13 @@ class StubMemoryStore:
         del self.rows[memory_id]
         return True
 
+    def update(self, memory_id, text, *, namespace):
+        row = self.rows.get(memory_id)
+        if row is None or row[0] != namespace:
+            return False
+        self.rows[memory_id] = (row[0], text)
+        return True
+
 
 def _serve(app, port):
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -200,11 +207,11 @@ def test_tool_listing(urls):
             return {t.name for t in await c.list_tools()}
 
     tools = asyncio.run(go())
-    assert len(tools) == 31
+    assert len(tools) == 32
     assert all(t.startswith("mealie_") for t in tools)
     assert {"mealie_search_recipes", "mealie_remember_personal", "mealie_recall_household"} <= tools
     assert {"mealie_rate_recipe", "mealie_comment_recipe", "mealie_update_recipe"} <= tools
-    assert {"mealie_list_notes", "mealie_forget_note"} <= tools
+    assert {"mealie_list_notes", "mealie_forget_note", "mealie_update_note"} <= tools
 
 
 def test_forwarded_identity_uses_that_users_token(urls):
@@ -287,6 +294,26 @@ def test_forget_note_cannot_reach_another_users_notes(urls):
                      secret="sekrit", user="brian@example.com"))
     assert "deleted" in ok
     assert note_id not in STUB_STORE.rows
+
+
+def test_update_note_rewrites_in_place_and_is_scoped(urls):
+    secret_url, _ = urls
+    saved = _text(_call(secret_url, "mealie_remember_household", {"text": "we double pasta"},
+                        secret="sekrit", user="brian@example.com"))
+    nid = int(saved.split("[")[1].split("]")[0])
+
+    ok = _text(_call(secret_url, "mealie_update_note",
+                     {"note_id": nid, "text": "we double every pasta recipe"},
+                     secret="sekrit", user="brian@example.com"))
+    assert "updated" in ok
+    assert STUB_STORE.rows[nid][1] == "we double every pasta recipe"
+
+    # Amy's household is different — her update must not land.
+    stolen = _text(_call(secret_url, "mealie_update_note",
+                         {"note_id": nid, "text": "overwritten"},
+                         secret="sekrit", user="amy@example.com"))
+    assert "not_found" in stolen
+    assert STUB_STORE.rows[nid][1] == "we double every pasta recipe"
 
 
 def test_bad_scope_is_rejected(urls):

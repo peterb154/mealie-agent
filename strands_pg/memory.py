@@ -114,6 +114,37 @@ class PgMemoryStore:
             for r in rows
         ]
 
+    def update(self, memory_id: int, text: str, *, namespace: str) -> bool:
+        """Replace a memory's text in place. Returns True if a row changed.
+
+        Preserves ``id`` and ``created_at`` — that's the whole point.
+        Delete-then-re-add loses both, restamping an old standing fact as
+        created today, and isn't atomic: a failure between the two calls
+        destroys the note with no rollback.
+
+        The embedding is recomputed in the same statement as the text. If
+        those ever move apart, ``search`` keeps matching the OLD wording
+        while returning the NEW text, which is the quiet kind of wrong.
+
+        ``namespace`` is required and takes no ``None``: it is purely an
+        authorization filter here (``id`` is already unique), so there is
+        no sensible unscoped update. A mismatch changes nothing and
+        returns False — surface that as not-found rather than
+        wrong-owner, which would leak that the row exists.
+        """
+        embedding = self._embedder(text)
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE memories
+                SET text = %s, embedding = %s::vector
+                WHERE id = %s AND namespace = %s
+                """,
+                (text, embedding, memory_id, namespace),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
     def delete(self, memory_id: int, namespace: str | None = None) -> bool:
         """Delete by id. Returns True if a row was removed.
 

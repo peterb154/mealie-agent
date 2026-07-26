@@ -46,6 +46,13 @@ class StubStore:
         del self.rows[memory_id]
         return True
 
+    def update(self, memory_id, text, *, namespace):
+        row = self.rows.get(memory_id)
+        if row is None or row[0] != namespace:
+            return False
+        self.rows[memory_id] = (row[0], text)
+        return True
+
 
 @pytest.fixture
 def store():
@@ -64,17 +71,69 @@ def test_manage_off_is_unchanged(store):
                      "remember_household", "recall_household"}
 
 
-def test_manage_on_adds_a_scoped_pair_per_namespace(store):
+def test_manage_on_adds_a_scoped_set_per_namespace(store):
     names = set(_by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True)))
     assert names == {
-        "remember_personal", "recall_personal", "list_personal_notes", "forget_personal_note",
-        "remember_household", "recall_household", "list_household_notes", "forget_household_note",
+        "remember_personal", "recall_personal", "list_personal_notes",
+        "forget_personal_note", "update_personal_note",
+        "remember_household", "recall_household", "list_household_notes",
+        "forget_household_note", "update_household_note",
     }
 
 
 def test_single_scope_names_are_unsuffixed(store):
     names = set(_by_name(memory_tools(namespace="solo", store=store, manage=True)))
-    assert names == {"remember", "recall", "list_notes", "forget_note"}
+    assert names == {"remember", "recall", "list_notes", "forget_note", "update_note"}
+
+
+def test_update_rewrites_in_place(store):
+    t = _by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True))
+    saved = t["remember_household"]("we double pasta")
+    nid = int(saved.split("[")[1].split("]")[0])
+
+    assert "updated" in t["update_household_note"](nid, "we double every pasta recipe")
+    # Same id, new text — not a delete-and-re-add.
+    assert store.rows[nid] == ("household:h-1", "we double every pasta recipe")
+    assert "we double every pasta recipe" in t["list_household_notes"]()
+
+
+def test_update_cannot_reach_another_scope(store):
+    t = _by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True))
+    saved = t["remember_personal"]("brian hates cilantro")
+    nid = int(saved.split("[")[1].split("]")[0])
+
+    assert "not_found" in t["update_household_note"](nid, "overwritten")
+    assert store.rows[nid][1] == "brian hates cilantro"  # untouched
+
+
+def test_update_rejects_empty_text(store):
+    t = _by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True))
+    saved = t["remember_household"]("keep me")
+    nid = int(saved.split("[")[1].split("]")[0])
+    assert "empty" in t["update_household_note"](nid, "   ")
+    assert store.rows[nid][1] == "keep me"
+
+
+def _specs(tools):
+    """What Strands actually advertises to the model."""
+    return {t.tool_spec["name"]: t.tool_spec["description"] for t in tools}
+
+
+def test_advertised_descriptions_are_the_scoped_ones(store):
+    """@tool snapshots the docstring into tool_spec at decoration time, so
+    reassigning __doc__ afterwards is invisible to the model. If this
+    regresses, every scoped tool silently advertises the generic
+    one-liner it was defined with and all the guidance is lost."""
+    specs = _specs(memory_tools(namespaces=NAMESPACES, store=store, manage=True))
+
+    # Scope has to be visible, or the model can't tell the pairs apart.
+    assert "(household)" in specs["remember_household"]
+    assert "(personal)" in specs["recall_personal"]
+
+    # The steering guidance has to survive into the spec, not just __doc__.
+    assert "update_household_note" in specs["forget_household_note"]
+    assert "STANDING facts" in specs["list_household_notes"]
+    assert "restamps" in specs["update_household_note"]
 
 
 def test_list_shows_ids_and_dates_and_is_namespace_scoped(store):

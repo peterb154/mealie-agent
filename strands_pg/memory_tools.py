@@ -92,6 +92,7 @@ def _build_pair(
     recall_name = f"recall_{suffix}" if suffix else "recall"
     list_name = f"list_{suffix}_notes" if suffix else "list_notes"
     forget_name = f"forget_{suffix}_note" if suffix else "forget_note"
+    update_name = f"update_{suffix}_note" if suffix else "update_note"
     scope_desc = f" ({suffix})" if suffix else ""
 
     @tool
@@ -129,7 +130,7 @@ def _build_pair(
     remember_fn.__doc__ = (
         f"Save a durable note{scope_desc}.\n\nArgs:\n    text: The content to remember."
     )
-    _retag_strands_tool(remember_fn, remember_name)
+    _retag_strands_tool(remember_fn, remember_name, remember_fn.__doc__)
 
     recall_fn.__name__ = recall_name
     recall_fn.__qualname__ = recall_name
@@ -137,7 +138,7 @@ def _build_pair(
         f"Search durable notes{scope_desc} by meaning. Returns top-k hits.\n\n"
         "Args:\n    query: Natural-language search query.\n    k: Max hits."
     )
-    _retag_strands_tool(recall_fn, recall_name)
+    _retag_strands_tool(recall_fn, recall_name, recall_fn.__doc__)
 
     if not manage:
         return [remember_fn, recall_fn]
@@ -181,7 +182,7 @@ def _build_pair(
         "    limit: Maximum notes to return (default 50).\n"
         "    offset: Skip this many, for paging through a large store."
     )
-    _retag_strands_tool(list_fn, list_name)
+    _retag_strands_tool(list_fn, list_name, list_fn.__doc__)
 
     forget_fn.__name__ = forget_name
     forget_fn.__qualname__ = forget_name
@@ -190,6 +191,9 @@ def _build_pair(
         f"Get ids from {list_name} or {recall_name} — they are the numbers "
         "shown in brackets. Deleting drops the note and its embedding "
         f"together, so it stops coming back from {recall_name} immediately.\n\n"
+        f"To CHANGE what a note says, use {update_name} instead — it keeps "
+        "the note's id and original date. Delete is for notes that "
+        "shouldn't exist at all.\n\n"
         "Confirm with the user before deleting anything they did not "
         "explicitly ask you to remove. A note in the wrong scope reports "
         "not_found and changes nothing; re-check the id rather than "
@@ -197,18 +201,53 @@ def _build_pair(
         "Args:\n"
         "    note_id: Numeric id shown in brackets, e.g. 23 for '[23]'."
     )
-    _retag_strands_tool(forget_fn, forget_name)
+    _retag_strands_tool(forget_fn, forget_name, forget_fn.__doc__)
 
-    return [remember_fn, recall_fn, list_fn, forget_fn]
+    @tool
+    def update_fn(note_id: int, text: str) -> str:
+        """Rewrite one durable note in place, keeping its id and date."""
+        if not text.strip():
+            return "(error: note text is empty)"
+        changed = mem.update(note_id, text.strip(), namespace=namespace)
+        if not changed:
+            return f"note_id={note_id} status=not_found (no such note in this scope)"
+        return f"note_id={note_id} status=updated"
+
+    update_fn.__name__ = update_name
+    update_fn.__qualname__ = update_name
+    update_fn.__doc__ = (
+        f"Rewrite one durable note{scope_desc} in place, keeping its id "
+        "and its original creation date.\n\n"
+        f"Prefer this over {forget_name} + {remember_name} when you are "
+        "correcting or tightening what a note SAYS. Deleting and re-saving "
+        "restamps an old standing fact as though it were learned today, "
+        "which makes the dates in the audit view lie, and it can lose the "
+        "note entirely if the re-save fails.\n\n"
+        "Pass the COMPLETE new text — it replaces the old text, it does "
+        "not append. A note in the wrong scope reports not_found and "
+        "changes nothing.\n\n"
+        "Args:\n"
+        "    note_id: Numeric id shown in brackets, e.g. 23 for '[23]'.\n"
+        "    text: The full replacement text for the note."
+    )
+    _retag_strands_tool(update_fn, update_name, update_fn.__doc__)
+
+    return [remember_fn, recall_fn, list_fn, forget_fn, update_fn]
 
 
-def _retag_strands_tool(tool_obj: Any, new_name: str) -> None:
-    """Update a Strands tool's advertised name after ``@tool`` has wrapped it.
+def _retag_strands_tool(tool_obj: Any, new_name: str, description: str | None = None) -> None:
+    """Update a Strands tool's advertised name and description after
+    ``@tool`` has wrapped it.
 
-    Strands' ``@tool`` decorator stores the tool name on the returned
-    object (as ``tool_name`` and inside ``tool_spec``). Different SDK
-    versions use different attribute names; set whatever exists so the
-    renamed tools register correctly across versions.
+    Strands' ``@tool`` decorator snapshots the name AND the docstring
+    into ``tool_spec`` at decoration time. Reassigning ``__doc__``
+    afterwards therefore changes nothing the model ever sees — the spec
+    keeps the original one-liner. ``description`` has to be written into
+    the spec explicitly or every scoped tool advertises the generic text
+    it was defined with.
+
+    Different SDK versions use different attribute names; set whatever
+    exists so this keeps working across versions.
     """
     for attr in ("tool_name", "_tool_name", "name", "_name"):
         if hasattr(tool_obj, attr):
@@ -216,5 +255,8 @@ def _retag_strands_tool(tool_obj: Any, new_name: str) -> None:
                 setattr(tool_obj, attr, new_name)
 
     spec = getattr(tool_obj, "tool_spec", None) or getattr(tool_obj, "_tool_spec", None)
-    if isinstance(spec, dict) and "name" in spec:
-        spec["name"] = new_name
+    if isinstance(spec, dict):
+        if "name" in spec:
+            spec["name"] = new_name
+        if description:
+            spec["description"] = description

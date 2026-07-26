@@ -301,6 +301,35 @@ def build_mcp(
             return f"(error: {exc})"
         return _list_notes(ns, limit, offset)
 
+    @mcp.tool(name="mealie_update_note")
+    def update_note(note_id: int, text: str, scope: str = "household") -> str:
+        """Rewrite one durable note in place, keeping its id and date.
+
+        Prefer this over forget_note + remember_* when you're correcting
+        or tightening what a note SAYS. Deleting and re-saving restamps
+        an old standing fact as though it were learned today — which
+        makes the dates in list_notes lie — and it can lose the note
+        entirely if the re-save fails after the delete succeeded.
+
+        Pass the COMPLETE new text; it replaces, it does not append.
+
+        Args:
+            note_id: Numeric id shown in brackets, e.g. 23 for '[23]'.
+            text: The full replacement text.
+            scope: 'household' or 'personal' — must match where the note
+                actually lives.
+        """
+        if not text.strip():
+            return "(error: note text is empty)"
+        ident = _resolve()
+        try:
+            ns = _namespace_for(scope, ident)
+        except ValueError as exc:
+            return f"(error: {exc})"
+        if not _get_store().update(note_id, text.strip(), namespace=ns):
+            return f"note_id={note_id} status=not_found (no such note in {scope} scope)"
+        return f"note_id={note_id} status=updated"
+
     @mcp.tool(name="mealie_forget_note")
     def forget_note(note_id: int, scope: str = "household") -> str:
         """Delete one durable note by id. Permanent.
@@ -308,6 +337,10 @@ def build_mcp(
         Get ids from list_notes or recall_*. Deleting drops the note and
         its embedding together, so it stops coming back from recall_*
         immediately.
+
+        To CHANGE what a note says, use update_note instead — it keeps
+        the id and the original date. Delete is for notes that shouldn't
+        exist at all.
 
         The delete is scoped to YOUR notes in the given scope — an id
         belonging to someone else, or in the other scope, reports
