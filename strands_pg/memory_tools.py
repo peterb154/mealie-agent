@@ -25,7 +25,6 @@ the right tool names for your scopes.
 
 from __future__ import annotations
 
-import contextlib
 from typing import Any
 
 from strands import tool
@@ -92,9 +91,9 @@ def _build_pair(
     recall_name = f"recall_{suffix}" if suffix else "recall"
     list_name = f"list_{suffix}_notes" if suffix else "list_notes"
     forget_name = f"forget_{suffix}_note" if suffix else "forget_note"
+    update_name = f"update_{suffix}_note" if suffix else "update_note"
     scope_desc = f" ({suffix})" if suffix else ""
 
-    @tool
     def remember_fn(text: str) -> str:
         """Save a durable note.
 
@@ -104,10 +103,12 @@ def _build_pair(
         mid = mem.add(text, namespace=namespace)
         if manage:
             # Hand back a citable id so the caller can undo what it wrote.
-            return f"Saved note [{mid}]. Remove it with {forget_name}({mid})."
+            return (
+                f"Saved note [{mid}]. Reword it with {update_name}({mid}, ...) "
+                f"or remove it with {forget_name}({mid})."
+            )
         return f"Saved memory #{mid}"
 
-    @tool
     def recall_fn(query: str, k: int = top_k) -> str:
         """Search durable notes by meaning. Returns top-k hits.
 
@@ -124,25 +125,18 @@ def _build_pair(
     # names. Set __name__ + __qualname__ + the tool_spec name so both the
     # agent's tool registry and the LLM's tool-use payloads see the new
     # identity. Update the docstring to mention the scope.
-    remember_fn.__name__ = remember_name
-    remember_fn.__qualname__ = remember_name
-    remember_fn.__doc__ = (
+    remember_tool = _as_tool(remember_fn, remember_name, (
         f"Save a durable note{scope_desc}.\n\nArgs:\n    text: The content to remember."
-    )
-    _retag_strands_tool(remember_fn, remember_name)
+    ))
 
-    recall_fn.__name__ = recall_name
-    recall_fn.__qualname__ = recall_name
-    recall_fn.__doc__ = (
+    recall_tool = _as_tool(recall_fn, recall_name, (
         f"Search durable notes{scope_desc} by meaning. Returns top-k hits.\n\n"
         "Args:\n    query: Natural-language search query.\n    k: Max hits."
-    )
-    _retag_strands_tool(recall_fn, recall_name)
+    ))
 
     if not manage:
-        return [remember_fn, recall_fn]
+        return [remember_tool, recall_tool]
 
-    @tool
     def list_fn(limit: int = 50, offset: int = 0) -> str:
         """List durable notes in full, newest first, with ids and dates."""
         rows = mem.list(namespace=namespace, limit=limit, offset=offset)
@@ -150,12 +144,9 @@ def _build_pair(
             return "No notes."
         out = []
         for h in rows:
-            created = getattr(h, "created_at", None)
-            when = created.strftime("%Y-%m-%d") if created else "unknown date"
-            out.append(f"- [{h.id}] ({when}) {h.text}")
+            out.append(f"- [{h.id}] ({_when(h)}) {h.text}")
         return "\n".join(out)
 
-    @tool
     def forget_fn(note_id: int) -> str:
         """Delete one durable note by id. Permanent."""
         # Scoped to this tool's namespace: ids are sequential and shown
@@ -165,9 +156,7 @@ def _build_pair(
             return f"note_id={note_id} status=not_found (no such note in this scope)"
         return f"note_id={note_id} status=deleted"
 
-    list_fn.__name__ = list_name
-    list_fn.__qualname__ = list_name
-    list_fn.__doc__ = (
+    list_tool = _as_tool(list_fn, list_name, (
         f"List durable notes{scope_desc} in full, newest first, with ids and dates.\n\n"
         "Unlike recall, this is exhaustive rather than top-k by similarity — "
         "it is the only way to audit the store, spot duplicates, or find "
@@ -180,41 +169,82 @@ def _build_pair(
         "Args:\n"
         "    limit: Maximum notes to return (default 50).\n"
         "    offset: Skip this many, for paging through a large store."
-    )
-    _retag_strands_tool(list_fn, list_name)
+    ))
 
-    forget_fn.__name__ = forget_name
-    forget_fn.__qualname__ = forget_name
-    forget_fn.__doc__ = (
+    forget_tool = _as_tool(forget_fn, forget_name, (
         f"Delete one durable note{scope_desc} by id. Permanent.\n\n"
         f"Get ids from {list_name} or {recall_name} — they are the numbers "
         "shown in brackets. Deleting drops the note and its embedding "
         f"together, so it stops coming back from {recall_name} immediately.\n\n"
+        f"To CHANGE what a note says, use {update_name} instead — it keeps "
+        "the note's id and original date. Delete is for notes that "
+        "shouldn't exist at all.\n\n"
         "Confirm with the user before deleting anything they did not "
         "explicitly ask you to remove. A note in the wrong scope reports "
         "not_found and changes nothing; re-check the id rather than "
         "guessing another.\n\n"
         "Args:\n"
         "    note_id: Numeric id shown in brackets, e.g. 23 for '[23]'."
-    )
-    _retag_strands_tool(forget_fn, forget_name)
+    ))
 
-    return [remember_fn, recall_fn, list_fn, forget_fn]
+    def update_fn(note_id: int, text: str) -> str:
+        """Rewrite one durable note in place, keeping its id and date."""
+        if not text.strip():
+            return "(error: note text is empty)"
+        changed = mem.update(note_id, text.strip(), namespace=namespace)
+        if not changed:
+            return f"note_id={note_id} status=not_found (no such note in this scope)"
+        return f"note_id={note_id} status=updated"
+
+    update_tool = _as_tool(update_fn, update_name, (
+        f"Rewrite one durable note{scope_desc} in place, keeping its id "
+        "and its original creation date.\n\n"
+        f"Prefer this over {forget_name} + {remember_name} when you are "
+        "correcting or tightening what a note SAYS. Deleting and re-saving "
+        "restamps an old standing fact as though it were learned today, "
+        "which makes the dates in the audit view lie, and it can lose the "
+        "note entirely if the re-save fails.\n\n"
+        "Pass the COMPLETE new text — it replaces the old text, it does "
+        "not append. A note in the wrong scope reports not_found and "
+        "changes nothing.\n\n"
+        "Args:\n"
+        "    note_id: Numeric id shown in brackets, e.g. 23 for '[23]'.\n"
+        "    text: The full replacement text for the note."
+    ))
+
+    return [remember_tool, recall_tool, list_tool, forget_tool, update_tool]
 
 
-def _retag_strands_tool(tool_obj: Any, new_name: str) -> None:
-    """Update a Strands tool's advertised name after ``@tool`` has wrapped it.
 
-    Strands' ``@tool`` decorator stores the tool name on the returned
-    object (as ``tool_name`` and inside ``tool_spec``). Different SDK
-    versions use different attribute names; set whatever exists so the
-    renamed tools register correctly across versions.
+def _when(hit: Any) -> str:
+    """Date label for a note. Shows the rewrite too when there was one —
+    ``update`` deliberately keeps created_at, so without this a note
+    reworded today still reads as untouched since April."""
+    created = getattr(hit, "created_at", None)
+    updated = getattr(hit, "updated_at", None)
+    if created is None:
+        return "unknown date"
+    label = created.strftime("%Y-%m-%d")
+    if updated is not None and updated.date() != created.date():
+        label += f", edited {updated.strftime('%Y-%m-%d')}"
+    return label
+
+
+def _as_tool(fn: Any, name: str, doc: str) -> Any:
+    """Name and document ``fn``, THEN wrap it with Strands' ``@tool``.
+
+    Order matters and is the whole reason this helper exists. ``@tool``
+    parses the function's name and docstring at decoration time to build
+    both the advertised description and the parameter ``inputSchema``.
+    Anything assigned afterwards — which is what a decorator forces, since
+    the scope suffix isn't known until runtime — is invisible to the
+    model: the tool keeps whatever generic one-liner it was defined with,
+    and its parameters come out as "Parameter note_id".
+
+    Decorating last means the docstring here is the docstring the model
+    receives, Args section included.
     """
-    for attr in ("tool_name", "_tool_name", "name", "_name"):
-        if hasattr(tool_obj, attr):
-            with contextlib.suppress(AttributeError, TypeError):
-                setattr(tool_obj, attr, new_name)
-
-    spec = getattr(tool_obj, "tool_spec", None) or getattr(tool_obj, "_tool_spec", None)
-    if isinstance(spec, dict) and "name" in spec:
-        spec["name"] = new_name
+    fn.__name__ = name
+    fn.__qualname__ = name
+    fn.__doc__ = doc
+    return tool(fn)
