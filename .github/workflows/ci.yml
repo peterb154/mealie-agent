@@ -15,6 +15,10 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: make lint
+      # Formatting is enforced from here on. It was adopted in one
+      # isolated commit (see .git-blame-ignore-revs) precisely so this
+      # check could be turned on without a mixed diff to argue about.
+      - run: make fmt
 
   test:
     runs-on: ubuntu-latest
