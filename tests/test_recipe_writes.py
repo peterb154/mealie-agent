@@ -57,6 +57,7 @@ class MockMealie:
     def __init__(self):
         self.recipe = copy.deepcopy(RECIPE)
         self.seen: list[tuple[str, str, dict | None]] = []
+        self.parser_fails = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -67,6 +68,25 @@ class MockMealie:
             return httpx.Response(200, json={"id": "u-1", "email": "brian@example.com"})
         if path == "/api/users/u-1/ratings/brownies":
             return httpx.Response(200, json={})
+        if path == "/api/parser/ingredients":
+            if self.parser_fails:
+                return httpx.Response(500, json={"detail": "parser down"})
+            out = []
+            for line in (body or {}).get("ingredients", []):
+                if "salt" in line.lower():
+                    # Resolved against known foods/units — safe to write.
+                    out.append({"confidence": {"average": 0.99}, "ingredient": {
+                        "quantity": 1,
+                        "unit": {"id": "u-1", "name": "teaspoon"},
+                        "food": {"id": "f-1", "name": "kosher salt"},
+                        "note": "",
+                    }})
+                else:
+                    # High confidence, but no id — PATCHing this 500s.
+                    out.append({"confidence": {"average": 0.97}, "ingredient": {
+                        "quantity": 1, "unit": None, "food": {"name": "mystery"}, "note": "",
+                    }})
+            return httpx.Response(200, json=out)
         if path == "/api/comments":
             return httpx.Response(201, json={"id": "c-1", **(body or {})})
         if path == "/api/recipes" and request.method == "POST":
@@ -272,13 +292,41 @@ def test_typo_fix_preserves_structure_of_untouched_lines(tools, mealie):
         "brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"]
     )
     ings = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeIngredient"]
-    assert [_text(i) for i in ings] == ["2 cups flour", "cocoa", "kosher salt"]
+    assert len(ings) == 3
+    assert [_text(i) for i in ings[:2]] == ["2 cups flour", "cocoa"]
     # Untouched line keeps everything a text round-trip would have lost.
     assert ings[0]["food"] == {"name": "flour"}
     assert ings[0]["quantity"] == 2
     assert ings[0]["title"] == "Dry ingredients"
-    # Only the edited line is rebuilt as a plain note.
+    # The edited line is re-parsed back into structure, not left as text.
+    assert ings[2]["food"] == {"id": "f-1", "name": "kosher salt"}
+    assert ings[2]["unit"] == {"id": "u-1", "name": "teaspoon"}
+
+
+def test_unresolvable_ingredient_stays_a_plain_note(tools, mealie):
+    """The parser reports 0.97 confidence on nonsense but returns no food
+    id. Writing that shape 500s, so it must fall back to a note."""
+    tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa", "1 blorptangle"])
+    ings = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeIngredient"]
+    assert ings[2] == _ingredient("1 blorptangle")
+    assert ings[2]["food"] is None
+
+
+def test_parser_outage_falls_back_instead_of_failing_the_edit(tools, mealie):
+    mealie.parser_fails = True
+    out = tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"])
+    assert "Updated" in out
+    ings = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeIngredient"]
     assert ings[2] == _ingredient("kosher salt")
+
+
+def test_unchanged_lines_are_never_sent_to_the_parser(tools, mealie):
+    """Re-parsing a line that already holds real structure could only
+    downgrade it. Only rebuilt entries go to the parser."""
+    tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"])
+    assert mealie.calls("POST", "/api/parser/ingredients") == [
+        {"parser": "nlp", "ingredients": ["kosher salt"]}
+    ]
 
 
 def test_edited_step_does_not_flatten_the_others(tools, mealie):

@@ -168,6 +168,18 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def parse_ingredients(self, lines: list[str]) -> list[dict[str, Any]]:
+        """Run Mealie's NLP parser over free-text ingredient lines.
+
+        Foods and units the instance already knows come back with real
+        ids; anything it can't resolve comes back name-only. That
+        distinction matters — see ``_structured_ingredient``."""
+        r = self._client.post(
+            "/api/parser/ingredients", json={"parser": "nlp", "ingredients": lines}
+        )
+        r.raise_for_status()
+        return r.json() or []
+
     def append_recipe_note(self, slug: str, title: str, text: str) -> dict[str, Any]:
         """Append one entry to a recipe's ``notes`` array, keeping the
         existing ones.
