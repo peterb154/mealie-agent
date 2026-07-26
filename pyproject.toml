@@ -35,6 +35,14 @@ dev = [
 # app.py and mcp_server.py sit at the repo root and run in place.
 package = false
 
+# `uv export` output changed shape between versions: 0.6 emitted only the
+# current platform's resolution, 0.11 emits the universal one with markers.
+# That difference silently dropped `jeepney` and `secretstorage`
+# (sys_platform == 'linux') from a macOS-generated requirements.txt, which
+# the Linux image then installed from. Pinning the range keeps every
+# machine and CI producing the same file. Bump deliberately.
+required-version = ">=0.11,<0.12"
+
 [tool.ruff]
 # Matches the existing code: only 11 lines in the repo exceed 100 chars.
 line-length = 100
