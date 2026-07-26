@@ -13,7 +13,8 @@ Built on [strands-pg](https://github.com/peterb154/strands-pgsql-agent-framework
   saved tag filters in Mealie).
 - **Favorites + ratings** — pulls the signed-in user's personal
   ratings from `/api/users/self/ratings` and surfaces them as ⭐ 4-5
-  hits when planning.
+  hits when planning — and writes them back after a meal, along with
+  reviews, recipe notes, and corrections.
 - **Meal planning** — sees recent history so he doesn't repeat what
   you just cooked, alternates household vs. personal preferences if
   that's your pattern, defaults to dinner unless told otherwise.
@@ -83,7 +84,12 @@ fronts everything; Cloudflare is not in this path.
 | `search_recipes_text` | tools/recipes.py | Mealie lexical search + tag/cookbook filter |
 | `top_rated_recipes` | tools/recipes.py | User's ⭐ 4+ / favorites |
 | `list_cookbooks` | tools/recipes.py | Mealie cookbooks (saved filters) |
-| `get_recipe` | tools/recipes.py | Full recipe detail + URL |
+| `get_recipe` | tools/recipes.py | Full recipe detail + notes + URL |
+| `rate_recipe` | tools/recipe_writes.py | Per-user stars / favorite flag |
+| `comment_recipe` | tools/recipe_writes.py | Dated review on the recipe thread |
+| `append_recipe_note` | tools/recipe_writes.py | Append to recipe Notes (substitutions, batch results) |
+| `create_recipe` | tools/recipe_writes.py | New recipe (name-first, then fill in) |
+| `update_recipe` | tools/recipe_writes.py | Correct fields; `confirm` gate on shrinking lists |
 | `list_meal_plan` | tools/mealplan.py | Upcoming scheduled meals |
 | `meal_plan_history` | tools/mealplan.py | Recent cooked meals (anti-repeat) |
 | `list_ingredients_for_meal_plan` | tools/mealplan.py | Flat ingredient dump for shopping-list build |

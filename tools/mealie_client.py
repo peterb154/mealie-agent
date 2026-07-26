@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -28,12 +29,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
+def _slugify(name: str) -> str:
+    """Approximate Mealie's organizer slug rule (python-slugify defaults).
+
+    Only used to *try* an exact lookup — callers fall back to search when
+    it misses, so an imperfect match here costs a round trip, not
+    correctness."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
 class MealieClient:
     """Small, synchronous HTTPX wrapper — one token per instance."""
 
     def __init__(self, base_url: str, token: str, *, timeout: httpx.Timeout | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self._user_id: str | None = None
         self._client = httpx.Client(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {token}"},
@@ -65,6 +76,19 @@ class MealieClient:
         r.raise_for_status()
         return r.json()
 
+    def self_user_id(self) -> str:
+        """This token's Mealie user UUID, cached for the instance lifetime.
+
+        Rating writes need it in the path — Mealie exposes ``self`` on the
+        read side (``/api/users/self/ratings``) but not the write side
+        (``/api/users/{id}/ratings/{slug}``)."""
+        if self._user_id is None:
+            me = self.whoami()
+            if not me or not me.get("id"):
+                raise RuntimeError("could not resolve Mealie user id — is the token valid?")
+            self._user_id = me["id"]
+        return self._user_id
+
     # --- recipes ------------------------------------------------------------
 
     def list_recipes(
@@ -91,6 +115,113 @@ class MealieClient:
         r = self._client.get("/api/users/self/ratings")
         r.raise_for_status()
         return (r.json() or {}).get("ratings", [])
+
+    def set_rating(
+        self, slug: str, *, rating: float | None = None, is_favorite: bool | None = None
+    ) -> None:
+        """Set the current user's rating and/or favorite flag on a recipe.
+
+        Mealie MERGES: on an existing row it only assigns the fields that
+        are non-null, so rating and favorite move independently. The
+        corollary is that the API cannot un-set a rating — there is no
+        delete-rating endpoint and ``rating: null`` is ignored on update.
+        Pass ``rating=0`` to clear; Mealie renders 0 as unrated."""
+        payload: dict[str, Any] = {}
+        if rating is not None:
+            payload["rating"] = rating
+        if is_favorite is not None:
+            payload["isFavorite"] = is_favorite
+        if not payload:
+            raise ValueError("set_rating needs a rating and/or is_favorite")
+        r = self._client.post(f"/api/users/{self.self_user_id()}/ratings/{slug}", json=payload)
+        r.raise_for_status()
+
+    def add_comment(self, recipe_id: str, text: str) -> dict[str, Any]:
+        """Append a comment to a recipe. Comments are per-user and purely
+        additive — nothing existing can be clobbered. Keyed by recipe ID,
+        not slug."""
+        r = self._client.post("/api/comments", json={"recipeId": recipe_id, "text": text})
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def create_recipe(self, name: str) -> str:
+        """Create an empty recipe and return its slug.
+
+        Mealie's create endpoint takes a name and nothing else; every
+        other field has to land in a follow-up patch. Callers that want a
+        fully-populated recipe should use ``patch_recipe`` right after."""
+        r = self._client.post("/api/recipes", json={"name": name})
+        r.raise_for_status()
+        return r.json()  # response_model=str — a bare JSON string (the slug)
+
+    def patch_recipe(self, slug: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Partial update — ONLY the keys present in ``fields`` change.
+
+        Mealie's PATCH handler dumps the parsed body with
+        ``exclude_unset=True``, so omitted keys are genuinely left alone
+        (unlike PUT, which replaces the whole document). Note that keys
+        which ARE present replace wholesale: sending ``recipeIngredient``
+        overwrites the entire ingredient list, it does not merge."""
+        if not fields:
+            raise ValueError("patch_recipe called with no fields")
+        r = self._client.patch(f"/api/recipes/{slug}", json=fields)
+        r.raise_for_status()
+        return r.json()
+
+    def append_recipe_note(self, slug: str, title: str, text: str) -> dict[str, Any]:
+        """Append one entry to a recipe's ``notes`` array, keeping the
+        existing ones.
+
+        Read-modify-write: Mealie has no note-level endpoint, so a naive
+        patch of ``notes`` would drop everything already there."""
+        recipe = self.get_recipe(slug)
+        notes = list(recipe.get("notes") or [])
+        notes.append({"title": title, "text": text})
+        return self.patch_recipe(slug, {"notes": notes})
+
+    # --- organizers (tags / categories) -------------------------------------
+
+    def find_organizer(self, kind: str, name: str) -> dict[str, Any] | None:
+        """Look up one tag/category by name. None if it doesn't exist.
+
+        Tries the exact slug endpoint first: ``search`` is lexical and
+        paginated, so a common prefix can push the exact match off the
+        first page — and a missed match means we create a duplicate."""
+        r = self._client.get(f"/api/organizers/{kind}/slug/{_slugify(name)}")
+        if r.status_code == 200 and r.json():
+            return r.json()
+        # Our slug rule may not match Mealie's for exotic names; fall back
+        # to search and compare on the name itself.
+        g = self._client.get(f"/api/organizers/{kind}", params={"search": name, "perPage": 100})
+        g.raise_for_status()
+        items = (g.json() or {}).get("items") or []
+        return next((i for i in items if (i.get("name") or "").lower() == name.lower()), None)
+
+    def resolve_organizers(self, kind: str, names: list[str]) -> list[dict[str, Any]]:
+        """Map tag/category NAMES onto Mealie organizer objects, creating
+        any that don't exist yet. ``kind`` is 'tags' or 'categories'.
+
+        Recipes reference tags by id, so a name-only payload silently
+        attaches nothing — this is the lookup that makes names work."""
+        if kind not in ("tags", "categories"):
+            raise ValueError(f"unknown organizer kind: {kind!r}")
+        out: list[dict[str, Any]] = []
+        for raw in names:
+            name = raw.strip()
+            if not name:
+                continue
+            match = self.find_organizer(kind, name)
+            if match is None:
+                c = self._client.post(f"/api/organizers/{kind}", json={"name": name})
+                if c.status_code in (409, 422):
+                    # Lost a race, or Mealie slugified it onto something
+                    # that already exists. Re-read rather than fail.
+                    match = self.find_organizer(kind, name)
+                if match is None:
+                    c.raise_for_status()
+                    match = c.json()
+            out.append({"id": match["id"], "name": match["name"], "slug": match["slug"]})
+        return out
 
     def top_rated_recipes(
         self,

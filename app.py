@@ -21,6 +21,7 @@ from strands_pg import (
 from tools.auth import verify_mealie_jwt
 from tools.mealie_client import MealieClient
 from tools.mealplan import mealplan_tools
+from tools.recipe_writes import recipe_write_tools
 from tools.recipes import recipe_tools
 from tools.shopping import shopping_tools
 from tools.weather import weather_tools
@@ -83,6 +84,7 @@ def build_agent(session_id: str, *, context: dict[str, Any] | None = None) -> Ag
         tools=[
             current_time,
             *recipe_tools(user_client),
+            *recipe_write_tools(user_client),
             *mealplan_tools(user_client),
             *shopping_tools(user_client),
             *weather_tools(),

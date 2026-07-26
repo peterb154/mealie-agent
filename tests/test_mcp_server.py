@@ -33,6 +33,7 @@ USERS = {
 TOKENS = {"brian@example.com": "tok-brian", "amy@example.com": "tok-amy"}
 
 calls: list[str] = []  # tokens seen on shopping-list creates
+ratings: list[tuple] = []  # (token, user_id, slug, body) seen on rating writes
 
 
 def _free_port() -> int:
@@ -60,6 +61,11 @@ def _mock_mealie() -> FastAPI:
     def cookbooks(authorization: str = Header(default="")):
         _token(authorization)
         return {"items": [{"name": "Family Faves", "slug": "family-faves", "queryFilterString": "tag=fav"}]}
+
+    @app.post("/api/users/{user_id}/ratings/{slug}")
+    def set_rating(user_id: str, slug: str, body: dict, authorization: str = Header(default="")):
+        ratings.append((_token(authorization), user_id, slug, body))
+        return {}
 
     @app.post("/api/households/shopping/lists")
     def create_list(body: dict, authorization: str = Header(default="")):
@@ -168,9 +174,10 @@ def test_tool_listing(urls):
             return {t.name for t in await c.list_tools()}
 
     tools = asyncio.run(go())
-    assert len(tools) == 24
+    assert len(tools) == 29
     assert all(t.startswith("mealie_") for t in tools)
     assert {"mealie_search_recipes", "mealie_remember_personal", "mealie_recall_household"} <= tools
+    assert {"mealie_rate_recipe", "mealie_comment_recipe", "mealie_update_recipe"} <= tools
 
 
 def test_forwarded_identity_uses_that_users_token(urls):
@@ -182,6 +189,19 @@ def test_forwarded_identity_uses_that_users_token(urls):
     _call(secret_url, "mealie_create_shopping_list", {"name": "Brian list"},
           secret="sekrit", user="brian@example.com")
     assert calls[-1] == "tok-brian"
+
+
+def test_rating_writes_land_under_the_forwarded_users_own_id(urls):
+    """Ratings are per-user AND the user id is in the path — a mix-up here
+    would write one person's verdict onto another's account."""
+    secret_url, _ = urls
+    _call(secret_url, "mealie_rate_recipe", {"slug": "brownies", "rating": 5},
+          secret="sekrit", user="amy@example.com")
+    assert ratings[-1] == ("tok-amy", "u-amy", "brownies", {"rating": 5.0})
+
+    _call(secret_url, "mealie_rate_recipe", {"slug": "brownies", "mark_favorite": True},
+          secret="sekrit", user="brian@example.com")
+    assert ratings[-1] == ("tok-brian", "u-brian", "brownies", {"isFavorite": True})
 
 
 def test_memory_namespaces_follow_identity(urls):
