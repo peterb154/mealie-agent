@@ -235,7 +235,8 @@ def _prune(
         log.warning(
             "prune: %d candidate(s) still exist in Mealie and were spared "
             "(missed by the paginated drain): %s",
-            len(survivors), ", ".join(survivors[:10]),
+            len(survivors),
+            ", ".join(survivors[:10]),
         )
     if not gone:
         log.info("prune: no candidates confirmed deleted")
@@ -270,7 +271,9 @@ def _drain_recipes(mc: MealieClient, updated_after: str | None) -> list[dict]:
         items = body.get("items") or []
         all_items.extend(items)
         total_pages = body.get("total_pages") or body.get("totalPages") or 1
-        log.info("fetched page %d/%d  (+%d, total=%d)", page, total_pages, len(items), len(all_items))
+        log.info(
+            "fetched page %d/%d  (+%d, total=%d)", page, total_pages, len(items), len(all_items)
+        )
         if page >= total_pages or not items:
             break
         page += 1
@@ -279,7 +282,9 @@ def _drain_recipes(mc: MealieClient, updated_after: str | None) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--full", action="store_true", help="Re-embed everything, not just new/updated.")
+    ap.add_argument(
+        "--full", action="store_true", help="Re-embed everything, not just new/updated."
+    )
     ap.add_argument(
         "--batch-sleep",
         type=float,

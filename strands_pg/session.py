@@ -81,9 +81,7 @@ class PgSessionManager(RepositorySessionManager, SessionRepository):
     # agents
     # ------------------------------------------------------------------
 
-    def create_agent(
-        self, session_id: str, session_agent: SessionAgent, **kwargs: Any
-    ) -> None:
+    def create_agent(self, session_id: str, session_agent: SessionAgent, **kwargs: Any) -> None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -97,9 +95,7 @@ class PgSessionManager(RepositorySessionManager, SessionRepository):
             )
             conn.commit()
 
-    def read_agent(
-        self, session_id: str, agent_id: str, **kwargs: Any
-    ) -> SessionAgent | None:
+    def read_agent(self, session_id: str, agent_id: str, **kwargs: Any) -> SessionAgent | None:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -113,9 +109,7 @@ class PgSessionManager(RepositorySessionManager, SessionRepository):
             return None
         return SessionAgent.from_dict(_as_dict(row[0]))
 
-    def update_agent(
-        self, session_id: str, session_agent: SessionAgent, **kwargs: Any
-    ) -> None:
+    def update_agent(self, session_id: str, session_agent: SessionAgent, **kwargs: Any) -> None:
         previous = self.read_agent(session_id=session_id, agent_id=session_agent.agent_id)
         if previous is None:
             raise SessionException(

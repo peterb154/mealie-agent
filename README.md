@@ -32,6 +32,27 @@ Built on [strands-pg](https://github.com/peterb154/strands-pgsql-agent-framework
   time, household, preferred store) and saves the answers before
   diving into the actual request.
 
+## Working on this
+
+```bash
+make test    # pytest
+make lint    # ruff check
+make fmt     # ruff format --check
+make fix     # format + autofix
+make check   # lint + test
+```
+
+Formatting is enforced in CI. `ruff format` was adopted in a single
+commit, so run this once to keep `git blame` readable:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+Dependencies live in `pyproject.toml` with `uv.lock` as the source of
+truth. `requirements.txt` is generated (`make requirements`) because the
+Docker image installs with pip; CI fails if the two drift.
+
 ## Deployment topology
 
 ```

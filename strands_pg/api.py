@@ -185,12 +185,8 @@ def make_app(
     # doesn't accept context. Mealie-style factories take context. We pass
     # context only when the factory advertises it.
     _factory_sig = inspect.signature(agent_factory)
-    _factory_accepts_context = (
-        "context" in _factory_sig.parameters
-        or any(
-            p.kind == inspect.Parameter.VAR_KEYWORD
-            for p in _factory_sig.parameters.values()
-        )
+    _factory_accepts_context = "context" in _factory_sig.parameters or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in _factory_sig.parameters.values()
     )
 
     def get_agent(session_id: str, context: dict[str, Any] | None = None) -> Any:
@@ -449,14 +445,10 @@ def _register_deploy_endpoint(app: FastAPI) -> None:
             raise HTTPException(status_code=401, detail="Invalid deploy token")
 
         try:
-            Path(deploy_trigger).write_text(
-                f"{datetime.now(UTC).isoformat()}\n", encoding="utf-8"
-            )
+            Path(deploy_trigger).write_text(f"{datetime.now(UTC).isoformat()}\n", encoding="utf-8")
         except OSError as exc:
             logger.exception("could not write deploy trigger")
-            raise HTTPException(
-                status_code=500, detail=f"trigger write failed: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"trigger write failed: {exc}") from exc
 
         logger.info("deploy trigger written to %s", deploy_trigger)
         # Response shape: n8n-compatible check `$json.status === "ok"`.

@@ -334,7 +334,12 @@ class MealieClient:
         return body.get("items", body) if isinstance(body, dict) else body
 
     def add_to_meal_plan(
-        self, *, date: str, entry_type: str, recipe_id: str | None = None, title: str = "",
+        self,
+        *,
+        date: str,
+        entry_type: str,
+        recipe_id: str | None = None,
+        title: str = "",
     ) -> dict[str, Any]:
         """``entry_type`` is one of breakfast/lunch/dinner/side."""
         payload: dict[str, Any] = {"date": date, "entryType": entry_type, "title": title}
@@ -394,9 +399,7 @@ class MealieClient:
 
     def create_shopping_list(self, name: str) -> dict[str, Any]:
         """Create a new shopping list scoped to the user's household."""
-        r = self._client.post(
-            "/api/households/shopping/lists", json={"name": name}
-        )
+        r = self._client.post("/api/households/shopping/lists", json={"name": name})
         r.raise_for_status()
         return r.json()
 
@@ -423,9 +426,7 @@ class MealieClient:
         return r.json()
 
     def check_shopping_item(self, item_id: str, *, checked: bool = True) -> dict[str, Any]:
-        r = self._client.put(
-            f"/api/households/shopping/items/{item_id}", json={"checked": checked}
-        )
+        r = self._client.put(f"/api/households/shopping/items/{item_id}", json={"checked": checked})
         r.raise_for_status()
         return r.json()
 
@@ -436,9 +437,7 @@ class MealieClient:
         if r.status_code >= 400:
             r.raise_for_status()
 
-    def clear_shopping_list(
-        self, list_id: str, *, checked_only: bool = False
-    ) -> tuple[int, int]:
+    def clear_shopping_list(self, list_id: str, *, checked_only: bool = False) -> tuple[int, int]:
         """Delete every item on the list (or only the checked ones if
         ``checked_only`` is True). Returns (deleted, failed)."""
         lst = self.get_shopping_list(list_id)

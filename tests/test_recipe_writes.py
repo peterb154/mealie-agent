@@ -43,7 +43,12 @@ RECIPE = {
         {"display": "KOHER salt", "note": "KOHER salt"},
     ],
     "recipeInstructions": [
-        {"id": "s-1", "title": "Prep", "text": "mix", "ingredientReferences": [{"referenceId": "x"}]},
+        {
+            "id": "s-1",
+            "title": "Prep",
+            "text": "mix",
+            "ingredientReferences": [{"referenceId": "x"}],
+        },
         {"id": "s-2", "title": "", "text": "bake", "ingredientReferences": []},
     ],
 }
@@ -76,17 +81,30 @@ class MockMealie:
             for line in (body or {}).get("ingredients", []):
                 if "salt" in line.lower():
                     # Resolved against known foods/units — safe to write.
-                    out.append({"confidence": {"average": 0.99}, "ingredient": {
-                        "quantity": 1,
-                        "unit": {"id": "u-1", "name": "teaspoon"},
-                        "food": {"id": "f-1", "name": "kosher salt"},
-                        "note": "",
-                    }})
+                    out.append(
+                        {
+                            "confidence": {"average": 0.99},
+                            "ingredient": {
+                                "quantity": 1,
+                                "unit": {"id": "u-1", "name": "teaspoon"},
+                                "food": {"id": "f-1", "name": "kosher salt"},
+                                "note": "",
+                            },
+                        }
+                    )
                 else:
                     # High confidence, but no id — PATCHing this 500s.
-                    out.append({"confidence": {"average": 0.97}, "ingredient": {
-                        "quantity": 1, "unit": None, "food": {"name": "mystery"}, "note": "",
-                    }})
+                    out.append(
+                        {
+                            "confidence": {"average": 0.97},
+                            "ingredient": {
+                                "quantity": 1,
+                                "unit": None,
+                                "food": {"name": "mystery"},
+                                "note": "",
+                            },
+                        }
+                    )
             return httpx.Response(200, json=out)
         if path == "/api/comments":
             return httpx.Response(201, json={"id": "c-1", **(body or {})})
@@ -180,9 +198,7 @@ def test_rate_recipe_rejects_bad_input_without_calling_mealie(tools, mealie, kwa
 def test_comment_recipe_resolves_slug_to_id(tools, mealie):
     out = tools["comment_recipe"]("brownies", "  kids loved it  ")
     assert "Comment added" in out
-    assert mealie.calls("POST", "/api/comments") == [
-        {"recipeId": "r-1", "text": "kids loved it"}
-    ]
+    assert mealie.calls("POST", "/api/comments") == [{"recipeId": "r-1", "text": "kids loved it"}]
 
 
 def test_empty_comment_is_refused(tools, mealie):
@@ -289,9 +305,7 @@ def test_typo_fix_preserves_structure_of_untouched_lines(tools, mealie):
     Rebuilding every entry from its display string would flatten parsed
     ingredients into free text and drop section headers — and the count
     is unchanged, so the confirm guard would never catch it."""
-    tools["update_recipe"](
-        "brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"]
-    )
+    tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"])
     ings = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeIngredient"]
     assert len(ings) == 3
     assert [_text(i) for i in ings[:2]] == ["2 cups flour", "cocoa"]

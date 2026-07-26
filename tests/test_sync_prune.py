@@ -103,12 +103,14 @@ class FakeMealie:
         self.asked.append(rid)
         if rid in self.errors:
             raise httpx.HTTPStatusError(
-                "boom", request=httpx.Request("GET", "http://x"),
+                "boom",
+                request=httpx.Request("GET", "http://x"),
                 response=httpx.Response(500),
             )
         if rid in self.deleted:
             raise httpx.HTTPStatusError(
-                "not found", request=httpx.Request("GET", "http://x"),
+                "not found",
+                request=httpx.Request("GET", "http://x"),
                 response=httpx.Response(404),
             )
         return {"id": rid}

@@ -33,6 +33,7 @@ def recipe_url(slug: str) -> str:
         return slug
     return f"{_MEALIE_URL}/g/{_MEALIE_GROUP_SLUG}/r/{slug}"
 
+
 # --- caps -------------------------------------------------------------------
 # How much recipe JSON we hand back to the LLM per get_recipe call.
 # Full Mealie recipe docs are ~3-10 KB; we trim to the fields the agent
@@ -92,6 +93,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             rows = cur.fetchall()
         if not rows:
             return "No recipes found. Has the sync run?"
+
         # Tool output is markdown the agent can quote verbatim. Full URL on
         # each entry so the agent's response is clickable even if the model
         # forgets the base URL.
@@ -101,6 +103,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
                 f"- **[{name}]({recipe_url(slug)})**{star} — "
                 f"{snippet[:120].strip()}  \n  `slug: {slug}`"
             )
+
         return "\n".join(_fmt(s, n, sn, r) for s, n, sn, r in rows)
 
     @tool
@@ -126,13 +129,12 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         items = body.get("items") or []
         if not items:
             return "No matches."
+
         def _fmt(it: dict[str, Any]) -> str:
             r = it.get("rating")
             star = f" ⭐ {r}/5" if isinstance(r, int | float) and r > 0 else ""
-            return (
-                f"- **[{it['name']}]({recipe_url(it['slug'])})**{star}  \n"
-                f"  `slug: {it['slug']}`"
-            )
+            return f"- **[{it['name']}]({recipe_url(it['slug'])})**{star}  \n  `slug: {it['slug']}`"
+
         return "\n".join(_fmt(it) for it in items[:15])
 
     @tool
@@ -224,12 +226,15 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
         if desc := trimmed.get("description"):
             out.append(desc)
         if trimmed.get("totalTime"):
-            out.append(f"\ntotal time: {trimmed['totalTime']}  "
-                       f"yield: {trimmed.get('recipeYield', '?')}")
+            out.append(
+                f"\ntotal time: {trimmed['totalTime']}  yield: {trimmed.get('recipeYield', '?')}"
+            )
         if ingredients:
             out.append("\n## Ingredients")
             for ing in ingredients:
-                out.append(f"- {ing.get('display') or ing.get('note') or ing.get('food', {}).get('name', '?')}")
+                out.append(
+                    f"- {ing.get('display') or ing.get('note') or ing.get('food', {}).get('name', '?')}"
+                )
         if steps:
             out.append("\n## Instructions")
             for i, s in enumerate(steps, 1):
@@ -238,8 +243,11 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             out.append("\n## Notes")
             for n in notes:
                 title = (n.get("title") or "").strip()
-                out.append(f"- **{title}** — {n.get('text', '').strip()}" if title
-                           else f"- {n.get('text', '').strip()}")
+                out.append(
+                    f"- **{title}** — {n.get('text', '').strip()}"
+                    if title
+                    else f"- {n.get('text', '').strip()}"
+                )
         return "\n".join(out)
 
     return [

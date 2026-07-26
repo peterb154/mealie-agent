@@ -33,9 +33,15 @@ class StubStore:
 
     def list(self, namespace=None, limit=50, offset=0, **kw):
         hits = [
-            SimpleNamespace(id=i, namespace=ns, text=t, metadata={}, distance=0.0,
-                            created_at=datetime(2026, 7, 26),
-                            updated_at=datetime(2026, 7, 28) if i in self.edited else None)
+            SimpleNamespace(
+                id=i,
+                namespace=ns,
+                text=t,
+                metadata={},
+                distance=0.0,
+                created_at=datetime(2026, 7, 26),
+                updated_at=datetime(2026, 7, 28) if i in self.edited else None,
+            )
             for i, (ns, t) in sorted(self.rows.items(), reverse=True)
             if ns == namespace
         ]
@@ -70,17 +76,27 @@ def _by_name(tools):
 def test_manage_off_is_unchanged(store):
     """Default must stay back-compatible for other framework consumers."""
     names = set(_by_name(memory_tools(namespaces=NAMESPACES, store=store)))
-    assert names == {"remember_personal", "recall_personal",
-                     "remember_household", "recall_household"}
+    assert names == {
+        "remember_personal",
+        "recall_personal",
+        "remember_household",
+        "recall_household",
+    }
 
 
 def test_manage_on_adds_a_scoped_set_per_namespace(store):
     names = set(_by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True)))
     assert names == {
-        "remember_personal", "recall_personal", "list_personal_notes",
-        "forget_personal_note", "update_personal_note",
-        "remember_household", "recall_household", "list_household_notes",
-        "forget_household_note", "update_household_note",
+        "remember_personal",
+        "recall_personal",
+        "list_personal_notes",
+        "forget_personal_note",
+        "update_personal_note",
+        "remember_household",
+        "recall_household",
+        "list_household_notes",
+        "forget_household_note",
+        "update_household_note",
     }
 
 

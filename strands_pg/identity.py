@@ -174,9 +174,7 @@ class PgIdentity:
                 title=meta.get("title"),
                 tags=meta.get("tags", []),
                 emails=meta.get("emails", []),
-                metadata={
-                    k: v for k, v in meta.items() if k not in {"title", "tags", "emails"}
-                },
+                metadata={k: v for k, v in meta.items() if k not in {"title", "tags", "emails"}},
             )
             written.append(user_id)
 

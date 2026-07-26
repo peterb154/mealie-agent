@@ -209,9 +209,7 @@ def mealplan_tools(user_client: MealieClient) -> list[Any]:
         except Exception as exc:  # noqa: BLE001
             logger.exception("update_meal_plan_entry failed")
             return f"(update failed: {exc})"
-        return (
-            f"moved entry {entry_id} → {result.get('date')} {result.get('entryType')}"
-        )
+        return f"moved entry {entry_id} → {result.get('date')} {result.get('entryType')}"
 
     @tool
     def delete_meal_plan_entry(entry_id: int) -> str:
