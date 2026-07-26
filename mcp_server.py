@@ -244,7 +244,12 @@ def build_mcp(
             return "No notes."
         lines = []
         for h in rows:
+            # created_at survives an edit by design, so surface the rewrite
+            # separately or a note reworded today reads as untouched.
             when = h.created_at.strftime("%Y-%m-%d") if h.created_at else "unknown date"
+            edited = getattr(h, "updated_at", None)
+            if edited is not None and h.created_at and edited.date() != h.created_at.date():
+                when += f", edited {edited.strftime('%Y-%m-%d')}"
             lines.append(f"- [{h.id}] ({when}) {h.text}")
         return "\n".join(lines)
 

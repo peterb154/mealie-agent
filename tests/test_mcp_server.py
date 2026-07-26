@@ -84,6 +84,7 @@ class StubMemoryStore:
     def __init__(self):
         self.added = []
         self.rows = {}  # id -> (namespace, text)
+        self.edited = set()
         self._next = 1
 
     def add(self, text, namespace=None, **kw):
@@ -99,13 +100,14 @@ class StubMemoryStore:
     def list(self, namespace=None, limit=100, offset=0, **kw):
         hits = [
             SimpleNamespace(id=i, namespace=ns, text=t, metadata={},
-                            distance=0.0, created_at=datetime(2026, 7, 26))
+                            distance=0.0, created_at=datetime(2026, 7, 26),
+                            updated_at=datetime(2026, 7, 28) if i in self.edited else None)
             for i, (ns, t) in sorted(self.rows.items(), reverse=True)
             if ns == namespace
         ]
         return hits[offset : offset + limit]
 
-    def delete(self, memory_id, namespace=None):
+    def delete(self, memory_id, *, namespace):
         row = self.rows.get(memory_id)
         if row is None or (namespace is not None and row[0] != namespace):
             return False
@@ -117,6 +119,7 @@ class StubMemoryStore:
         if row is None or row[0] != namespace:
             return False
         self.rows[memory_id] = (row[0], text)
+        self.edited.add(memory_id)
         return True
 
 

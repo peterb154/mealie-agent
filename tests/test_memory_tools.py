@@ -19,6 +19,7 @@ NAMESPACES = {"personal": "user:brian@example.com", "household": "household:h-1"
 class StubStore:
     def __init__(self):
         self.rows = {}
+        self.edited = set()
         self._next = 1
 
     def add(self, text, namespace=None, **kw):
@@ -33,13 +34,14 @@ class StubStore:
     def list(self, namespace=None, limit=50, offset=0, **kw):
         hits = [
             SimpleNamespace(id=i, namespace=ns, text=t, metadata={}, distance=0.0,
-                            created_at=datetime(2026, 7, 26))
+                            created_at=datetime(2026, 7, 26),
+                            updated_at=datetime(2026, 7, 28) if i in self.edited else None)
             for i, (ns, t) in sorted(self.rows.items(), reverse=True)
             if ns == namespace
         ]
         return hits[offset : offset + limit]
 
-    def delete(self, memory_id, namespace=None):
+    def delete(self, memory_id, *, namespace):
         row = self.rows.get(memory_id)
         if row is None or (namespace is not None and row[0] != namespace):
             return False
@@ -51,6 +53,7 @@ class StubStore:
         if row is None or row[0] != namespace:
             return False
         self.rows[memory_id] = (row[0], text)
+        self.edited.add(memory_id)
         return True
 
 
@@ -94,7 +97,11 @@ def test_update_rewrites_in_place(store):
     assert "updated" in t["update_household_note"](nid, "we double every pasta recipe")
     # Same id, new text — not a delete-and-re-add.
     assert store.rows[nid] == ("household:h-1", "we double every pasta recipe")
-    assert "we double every pasta recipe" in t["list_household_notes"]()
+    listed = t["list_household_notes"]()
+    assert "we double every pasta recipe" in listed
+    # created_at survives the edit by design, so the rewrite must show
+    # separately or the audit view reads as untouched.
+    assert "edited 2026-07-28" in listed
 
 
 def test_update_cannot_reach_another_scope(store):
@@ -169,8 +176,24 @@ def test_forget_is_scoped_to_its_own_namespace(store):
 def test_remember_returns_a_citable_id_when_manage_is_on(store):
     t = _by_name(memory_tools(namespaces=NAMESPACES, store=store, manage=True))
     out = t["remember_personal"]("no bottom-feeder fish")
+    # Offers the non-destructive option too — this string is the most-read
+    # text in the flow and shouldn't point only at delete.
+    assert "update_personal_note(" in out
     assert "forget_personal_note(" in out
     assert int(out.split("[")[1].split("]")[0]) in store.rows
+
+
+def test_parameter_descriptions_reach_the_model(store):
+    """@tool builds inputSchema from the docstring at decoration time too,
+    not just the description. If the tools are decorated before their
+    final docstring is set, every parameter comes out as "Parameter x"."""
+    for t in memory_tools(namespaces=NAMESPACES, store=store, manage=True):
+        props = t.tool_spec["inputSchema"]["json"].get("properties", {})
+        for pname, schema in props.items():
+            desc = schema.get("description", "")
+            assert desc and not desc.startswith("Parameter "), (
+                f"{t.tool_spec['name']}.{pname} has placeholder description {desc!r}"
+            )
 
 
 def test_list_paging(store):

@@ -40,6 +40,7 @@ class MemoryHit:
     metadata: dict[str, Any]
     distance: float  # cosine distance in [0, 2]; lower = closer
     created_at: datetime | None = None  # populated by list(); None from search()
+    updated_at: datetime | None = None  # None = never rewritten since creation
 
 
 class PgMemoryStore:
@@ -120,7 +121,9 @@ class PgMemoryStore:
         Preserves ``id`` and ``created_at`` — that's the whole point.
         Delete-then-re-add loses both, restamping an old standing fact as
         created today, and isn't atomic: a failure between the two calls
-        destroys the note with no rollback.
+        destroys the note with no rollback. ``updated_at`` records the
+        rewrite, so the audit view can distinguish "learned in April"
+        from "learned in April, reworded today".
 
         The embedding is recomputed in the same statement as the text. If
         those ever move apart, ``search`` keeps matching the OLD wording
@@ -132,12 +135,22 @@ class PgMemoryStore:
         returns False — surface that as not-found rather than
         wrong-owner, which would leak that the row exists.
         """
-        embedding = self._embedder(text)
         with self._pool.connection() as conn, conn.cursor() as cur:
+            # Check first so a bad id doesn't pay for an embedding call.
+            # If the row vanishes between here and the UPDATE, rowcount
+            # is 0 and we still return False.
+            cur.execute(
+                "SELECT 1 FROM memories WHERE id = %s AND namespace = %s",
+                (memory_id, namespace),
+            )
+            if cur.fetchone() is None:
+                return False
+
+            embedding = self._embedder(text)
             cur.execute(
                 """
                 UPDATE memories
-                SET text = %s, embedding = %s::vector
+                SET text = %s, embedding = %s::vector, updated_at = now()
                 WHERE id = %s AND namespace = %s
                 """,
                 (text, embedding, memory_id, namespace),
@@ -145,7 +158,7 @@ class PgMemoryStore:
             conn.commit()
             return cur.rowcount > 0
 
-    def delete(self, memory_id: int, namespace: str | None = None) -> bool:
+    def delete(self, memory_id: int, *, namespace: str | None) -> bool:
         """Delete by id. Returns True if a row was removed.
 
         ALWAYS pass ``namespace`` in a multi-tenant deployment. Ids are
@@ -155,7 +168,9 @@ class PgMemoryStore:
         Scoping turns that into a no-op that returns False.
 
         ``namespace=None`` deletes by id alone, which is only safe when
-        the whole store belongs to one tenant.
+        the whole store belongs to one tenant. It is required rather
+        than defaulted so the unscoped delete has to be asked for out
+        loud, never reached by forgetting an argument.
         """
         with self._pool.connection() as conn, conn.cursor() as cur:
             if namespace is None:
@@ -184,7 +199,7 @@ class PgMemoryStore:
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, namespace, text, metadata, created_at
+                SELECT id, namespace, text, metadata, created_at, updated_at
                 FROM memories
                 WHERE namespace = %s
                 ORDER BY created_at DESC, id DESC
@@ -201,6 +216,7 @@ class PgMemoryStore:
                 metadata=r[3] if isinstance(r[3], dict) else {},
                 distance=0.0,
                 created_at=r[4],
+                updated_at=r[5],
             )
             for r in rows
         ]
