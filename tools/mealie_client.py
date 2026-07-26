@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -26,6 +27,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+
+
+def _slugify(name: str) -> str:
+    """Approximate Mealie's organizer slug rule (python-slugify defaults).
+
+    Only used to *try* an exact lookup — callers fall back to search when
+    it misses, so an imperfect match here costs a round trip, not
+    correctness."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 class MealieClient:
@@ -171,6 +181,22 @@ class MealieClient:
 
     # --- organizers (tags / categories) -------------------------------------
 
+    def find_organizer(self, kind: str, name: str) -> dict[str, Any] | None:
+        """Look up one tag/category by name. None if it doesn't exist.
+
+        Tries the exact slug endpoint first: ``search`` is lexical and
+        paginated, so a common prefix can push the exact match off the
+        first page — and a missed match means we create a duplicate."""
+        r = self._client.get(f"/api/organizers/{kind}/slug/{_slugify(name)}")
+        if r.status_code == 200 and r.json():
+            return r.json()
+        # Our slug rule may not match Mealie's for exotic names; fall back
+        # to search and compare on the name itself.
+        g = self._client.get(f"/api/organizers/{kind}", params={"search": name, "perPage": 100})
+        g.raise_for_status()
+        items = (g.json() or {}).get("items") or []
+        return next((i for i in items if (i.get("name") or "").lower() == name.lower()), None)
+
     def resolve_organizers(self, kind: str, names: list[str]) -> list[dict[str, Any]]:
         """Map tag/category NAMES onto Mealie organizer objects, creating
         any that don't exist yet. ``kind`` is 'tags' or 'categories'.
@@ -184,14 +210,16 @@ class MealieClient:
             name = raw.strip()
             if not name:
                 continue
-            g = self._client.get(f"/api/organizers/{kind}", params={"search": name, "perPage": 50})
-            g.raise_for_status()
-            items = (g.json() or {}).get("items") or []
-            match = next((i for i in items if (i.get("name") or "").lower() == name.lower()), None)
+            match = self.find_organizer(kind, name)
             if match is None:
                 c = self._client.post(f"/api/organizers/{kind}", json={"name": name})
-                c.raise_for_status()
-                match = c.json()
+                if c.status_code in (409, 422):
+                    # Lost a race, or Mealie slugified it onto something
+                    # that already exists. Re-read rather than fail.
+                    match = self.find_organizer(kind, name)
+                if match is None:
+                    c.raise_for_status()
+                    match = c.json()
             out.append({"id": match["id"], "name": match["name"], "slug": match["slug"]})
         return out
 

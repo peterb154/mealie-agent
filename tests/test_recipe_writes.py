@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from tools.mealie_client import MealieClient
-from tools.recipe_writes import recipe_write_tools
+from tools.recipe_writes import _ingredient, _ingredient_text as _text, _step, recipe_write_tools
 
 BASE = "http://mealie.test"
 
@@ -26,8 +26,25 @@ RECIPE = {
     "totalTime": None,
     "recipeYield": "24 brownies",
     "notes": [{"title": "old note", "text": "keep me"}],
-    "recipeIngredient": [{"note": "flour"}, {"note": "cocoa"}, {"note": "KOHER salt"}],
-    "recipeInstructions": [{"text": "mix"}, {"text": "bake"}],
+    "tags": [{"id": "t-1", "name": "Dessert", "slug": "dessert"}],
+    "recipeIngredient": [
+        # Parsed, and inside a section — everything a plain-text
+        # round-trip would silently throw away.
+        {
+            "display": "2 cups flour",
+            "note": "",
+            "quantity": 2,
+            "unit": {"name": "cup"},
+            "food": {"name": "flour"},
+            "title": "Dry ingredients",
+        },
+        {"display": "cocoa", "note": "cocoa"},
+        {"display": "KOHER salt", "note": "KOHER salt"},
+    ],
+    "recipeInstructions": [
+        {"id": "s-1", "title": "Prep", "text": "mix", "ingredientReferences": [{"referenceId": "x"}]},
+        {"id": "s-2", "title": "", "text": "bake", "ingredientReferences": []},
+    ],
 }
 
 EXISTING_TAG = {"id": "t-1", "name": "Dessert", "slug": "dessert"}
@@ -57,6 +74,9 @@ class MockMealie:
         if path == "/api/recipes/brownies":
             if request.method == "PATCH":
                 self.recipe.update(body or {})
+                if "name" in (body or {}):
+                    # Mealie re-slugs on rename (RepositoryRecipes.update).
+                    self.recipe["slug"] = body["name"].lower().replace(" ", "-")
             return httpx.Response(200, json=self.recipe)
         if path == "/api/recipes/coleslaw":
             return httpx.Response(200, json={"id": "r-2", "slug": "coleslaw"})
@@ -64,9 +84,14 @@ class MockMealie:
             if request.method == "POST":
                 name = (body or {})["name"]
                 return httpx.Response(201, json={"id": "t-new", "name": name, "slug": name.lower()})
-            search = request.url.params.get("search", "")
-            items = [EXISTING_TAG] if search.lower() == "dessert" else []
-            return httpx.Response(200, json={"items": items})
+            if "/slug/" in path:
+                wanted = path.rsplit("/", 1)[-1]
+                if wanted == EXISTING_TAG["slug"]:
+                    return httpx.Response(200, json=EXISTING_TAG)
+                return httpx.Response(404, json={"detail": "not found"})
+            # Deliberately unhelpful: exercises the search fallback only
+            # when the slug lookup misses.
+            return httpx.Response(200, json={"items": []})
         return httpx.Response(404, json={"detail": f"unmocked: {request.method} {path}"})
 
     def calls(self, method: str, needle: str) -> list[dict | None]:
@@ -211,6 +236,14 @@ def test_update_recipe_sends_only_changed_fields(tools, mealie):
     assert "totalTime" in out
 
 
+def test_rename_reports_the_new_slug(tools, mealie):
+    """Mealie re-slugs on rename. Returning the old slug hands the user a
+    dead link and breaks the agent's next call."""
+    out = tools["update_recipe"]("brownies", name="Fudgy Brownies")
+    assert "fudgy-brownies" in out
+    assert "old link no longer works" in out
+
+
 def test_update_recipe_noop_sends_nothing(tools, mealie):
     out = tools["update_recipe"]("brownies", recipe_yield="24 brownies")
     assert "No changes" in out
@@ -218,21 +251,60 @@ def test_update_recipe_noop_sends_nothing(tools, mealie):
 
 
 def test_shorter_ingredient_list_is_refused_without_confirm(tools, mealie):
-    out = tools["update_recipe"]("brownies", ingredients=["flour", "cocoa"])
+    out = tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa"])
     assert "refused" in out and "recipeIngredient 3 → 2" in out
     assert mealie.calls("PATCH", "/api/recipes/brownies") == []
 
 
 def test_shorter_ingredient_list_goes_through_with_confirm(tools, mealie):
-    tools["update_recipe"]("brownies", ingredients=["flour", "cocoa"], confirm=True)
+    tools["update_recipe"]("brownies", ingredients=["2 cups flour", "cocoa"], confirm=True)
     fields = mealie.calls("PATCH", "/api/recipes/brownies")[-1]
-    assert [i["note"] for i in fields["recipeIngredient"]] == ["flour", "cocoa"]
+    assert [_text(i) for i in fields["recipeIngredient"]] == ["2 cups flour", "cocoa"]
 
 
-def test_same_length_replacement_needs_no_confirm(tools, mealie):
-    """The typo-fix case: 3 ingredients in, 3 out, one word changed."""
+def test_typo_fix_preserves_structure_of_untouched_lines(tools, mealie):
+    """The issue #9 case: fix one word, send the full list back.
+
+    Rebuilding every entry from its display string would flatten parsed
+    ingredients into free text and drop section headers — and the count
+    is unchanged, so the confirm guard would never catch it."""
     tools["update_recipe"](
-        "brownies", ingredients=["flour", "cocoa", "kosher salt"]
+        "brownies", ingredients=["2 cups flour", "cocoa", "kosher salt"]
     )
+    ings = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeIngredient"]
+    assert [_text(i) for i in ings] == ["2 cups flour", "cocoa", "kosher salt"]
+    # Untouched line keeps everything a text round-trip would have lost.
+    assert ings[0]["food"] == {"name": "flour"}
+    assert ings[0]["quantity"] == 2
+    assert ings[0]["title"] == "Dry ingredients"
+    # Only the edited line is rebuilt as a plain note.
+    assert ings[2] == _ingredient("kosher salt")
+
+
+def test_edited_step_does_not_flatten_the_others(tools, mealie):
+    tools["update_recipe"]("brownies", instructions=["mix", "bake at 350"])
+    steps = mealie.calls("PATCH", "/api/recipes/brownies")[-1]["recipeInstructions"]
+    assert steps[0]["title"] == "Prep"
+    assert steps[0]["ingredientReferences"] == [{"referenceId": "x"}]
+    assert steps[1] == _step("bake at 350")
+
+
+def test_dropping_tags_needs_confirm_too(tools, mealie):
+    """tags=[] wipes every tag. Same class of loss as a shorter
+    ingredient list, so the same gate applies."""
+    out = tools["update_recipe"]("brownies", tags=[])
+    assert "refused" in out and "tags 1 → 0" in out
+    assert mealie.calls("PATCH", "/api/recipes/brownies") == []
+
+    tools["update_recipe"]("brownies", tags=[], confirm=True)
+    assert mealie.calls("PATCH", "/api/recipes/brownies")[-1] == {"tags": []}
+
+
+def test_existing_tag_is_found_by_slug_not_by_search(tools, mealie):
+    """Search is lexical and paginated; an exact-name miss would create a
+    duplicate tag. The mock's search always returns nothing, so a pass
+    here proves the slug lookup is what resolved it."""
+    tools["update_recipe"]("brownies", tags=["Dessert"], confirm=True)
     fields = mealie.calls("PATCH", "/api/recipes/brownies")[-1]
-    assert [i["note"] for i in fields["recipeIngredient"]][-1] == "kosher salt"
+    assert fields["tags"] == [EXISTING_TAG]
+    assert mealie.calls("POST", "/api/organizers/") == []

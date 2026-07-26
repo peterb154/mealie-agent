@@ -45,6 +45,37 @@ def _step(text: str) -> dict[str, Any]:
     return {"title": "", "text": text.strip()}
 
 
+def _ingredient_text(ing: dict[str, Any]) -> str:
+    return ((ing.get("display") or ing.get("note")) or "").strip()
+
+
+def _step_text(step: dict[str, Any]) -> str:
+    return (step.get("text") or "").strip()
+
+
+def _merge(
+    existing: list[dict[str, Any]],
+    lines: list[str],
+    build: Any,
+    text_of: Any,
+) -> list[dict[str, Any]]:
+    """Rebuild a list from plain text, KEEPING the original object
+    wherever the text is unchanged.
+
+    Rebuilding every entry would be quietly lossy: a parsed Mealie
+    ingredient carries food/unit/quantity, a section header lives in
+    ``title``, and steps carry ingredientReferences — none of which
+    survive a round-trip through display text. Since the agent is told
+    to send the complete list back after editing one line, rebuilding
+    wholesale would downgrade the whole recipe on every typo fix. Only
+    genuinely edited lines degrade to a free-text note."""
+    out: list[dict[str, Any]] = []
+    for i, line in enumerate(lines):
+        old = existing[i] if i < len(existing) else None
+        out.append(old if old is not None and text_of(old) == line else build(line))
+    return out
+
+
 def _clean(lines: list[str] | None) -> list[str]:
     return [s.strip() for s in (lines or []) if s and s.strip()]
 
@@ -258,10 +289,12 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
         """Correct fields on an existing recipe. Returns a before/after diff.
 
         Fields you don't pass are left alone. Fields you DO pass REPLACE
-        what's there — ingredients and instructions especially: pass the
-        complete list every time, never just the lines you're changing.
-        Fetch the recipe with get_recipe first, edit the full list, send
-        it back.
+        what's there — ingredients, instructions, tags and categories
+        especially: pass the complete list every time, never just the
+        entries you're changing. Fetch the recipe with get_recipe first,
+        edit the full list, send it back. Lines you leave exactly as they
+        were keep their existing structure; only edited lines are
+        rewritten.
 
         Do NOT use this to record how a batch turned out — that's
         append_recipe_note (which appends) or comment_recipe. This is for
@@ -270,7 +303,8 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
 
         Args:
             slug: Recipe slug.
-            name: New title. Note that Mealie keeps the original slug.
+            name: New title. Renaming ALSO changes the slug — the reply
+                reports the new one, and the old slug stops working.
             description: Replacement description.
             ingredients: COMPLETE replacement ingredient list.
             instructions: COMPLETE replacement list of step text.
@@ -280,9 +314,9 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
             cook_time: e.g. '30 minutes'.
             tags: COMPLETE replacement list of tag NAMES.
             categories: COMPLETE replacement list of category NAMES.
-            confirm: Required (True) only when the new ingredient or
-                instruction list is SHORTER than the current one, since
-                that drops lines. Ask the user before setting it.
+            confirm: Required (True) when any replacement list is SHORTER
+                than the current one, since that drops entries. Ask the
+                user before setting it.
         """
         try:
             before = user_client.get_recipe(slug)
@@ -309,29 +343,44 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
         _scalar("prepTime", prep_time)
         _scalar("cookTime", cook_time)
 
-        # The only way to lose data here: a replacement list shorter than
-        # what's on the recipe. Everything else is same-size or additive.
+        # Every list field REPLACES what's there, so a shorter list drops
+        # entries. Collect every shrink first and refuse the whole call —
+        # partial application would be worse than none.
         shrinking: list[str] = []
-        for key, raw, build in (
-            ("recipeIngredient", ingredients, _ingredient),
-            ("recipeInstructions", instructions, _step),
+        for key, raw, build, text_of in (
+            ("recipeIngredient", ingredients, _ingredient, _ingredient_text),
+            ("recipeInstructions", instructions, _step, _step_text),
         ):
             if raw is None:
                 continue
             incoming = _clean(raw)
-            old_n = len(before.get(key) or [])
-            if len(incoming) < old_n:
-                shrinking.append(f"{key} {old_n} → {len(incoming)}")
-            fields[key] = [build(x) for x in incoming]
-            diff.append(f"- {key}: {old_n} → {len(incoming)} item(s)")
+            existing = before.get(key) or []
+            if len(incoming) < len(existing):
+                shrinking.append(f"{key} {len(existing)} → {len(incoming)}")
+            merged = _merge(existing, incoming, build, text_of)
+            fields[key] = merged
+            rewritten = sum(1 for i, m in enumerate(merged) if i >= len(existing) or m is not existing[i])
+            diff.append(f"- {key}: {len(incoming)} item(s), {rewritten} changed")
+
+        # Tags and categories replace wholesale too — tags=[] wipes them.
+        for label, raw, existing_key in (
+            ("tags", tags, "tags"),
+            ("categories", categories, "recipeCategory"),
+        ):
+            if raw is None:
+                continue
+            old_n = len(before.get(existing_key) or [])
+            if len(_clean(raw)) < old_n:
+                shrinking.append(f"{label} {old_n} → {len(_clean(raw))}")
 
         if shrinking and not confirm:
             return (
-                f"(refused: this would DROP lines from {slug} — "
+                f"(refused: this would DROP entries from {slug} — "
                 f"{'; '.join(shrinking)}. Send the complete list, or confirm "
                 f"with the user and call again with confirm=True.)"
             )
 
+        # Resolved after the guard so a refused call costs no writes.
         try:
             if tags is not None:
                 fields["tags"] = user_client.resolve_organizers("tags", _clean(tags))
@@ -349,11 +398,17 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
             return f"No changes — [{slug}]({recipe_url(slug)}) already matches."
 
         try:
-            user_client.patch_recipe(slug, fields)
+            updated = user_client.patch_recipe(slug, fields)
         except Exception as exc:  # noqa: BLE001
             logger.exception("update_recipe failed for slug=%s", slug)
             return f"(update error: {exc})"
-        return f"Updated **[{slug}]({recipe_url(slug)})**:\n" + "\n".join(diff)
+
+        # Mealie re-slugs on rename, so the slug the caller passed may now
+        # be dead. Report the new one or the agent's next call 404s.
+        new_slug = updated.get("slug") or slug
+        if new_slug != slug:
+            diff.append(f"- slug: {slug} → {new_slug} (the old link no longer works)")
+        return f"Updated **[{new_slug}]({recipe_url(new_slug)})**:\n" + "\n".join(diff)
 
     return [
         rate_recipe,
