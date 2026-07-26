@@ -1,8 +1,15 @@
 """Prune logic for the recipe mirror.
 
-The guard is the point: an incomplete Mealie drain is indistinguishable
-from someone deleting most of the library, and acting on the wrong one
-wipes the vector index that semantic search runs on.
+Two things are worth testing here, and neither needs a database:
+
+- ``_select_orphans`` — the judgement call about how much deletion is
+  believable. Pure function, no SQL.
+- ``_confirm_gone`` — the check that stops a paginated-drain miss from
+  being read as a deletion.
+
+The DELETE statement itself is one parameterised line and isn't
+meaningfully testable without Postgres; asserting on a hand-rolled fake
+cursor would only prove we wrote the string we wrote.
 
 Run:  uv run --with-requirements requirements.txt --with pytest -m pytest tests/
 """
@@ -10,114 +17,163 @@ Run:  uv run --with-requirements requirements.txt --with pytest -m pytest tests/
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import sync_recipes  # noqa: E402
 
 
-class FakeCursor:
-    def __init__(self, conn):
-        self.conn = conn
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def execute(self, sql, params=None):
-        if sql.strip().startswith("SELECT"):
-            self.conn.fetched = [(rid, slug) for rid, slug in self.conn.rows]
-        elif "DELETE" in sql:
-            doomed = set(params[0])
-            self.conn.deleted += [r for r in self.conn.rows if r[0] in doomed]
-            self.conn.rows = [r for r in self.conn.rows if r[0] not in doomed]
-
-    def fetchall(self):
-        return self.conn.fetched
-
-
-class FakeConn:
-    def __init__(self, rows):
-        self.rows = list(rows)
-        self.deleted = []
-        self.fetched = []
-        self.commits = 0
-
-    def cursor(self):
-        return FakeCursor(self)
-
-    def commit(self):
-        self.commits += 1
-
-
-def _mirror(n, start=0):
+def _rows(n, start=0):
     return [(f"id-{i}", f"recipe-{i}") for i in range(start, start + n)]
 
 
-def test_nothing_to_prune_when_all_live():
-    conn = FakeConn(_mirror(5))
-    assert sync_recipes._prune(conn, {f"id-{i}" for i in range(5)}) == 0
-    assert conn.deleted == []
+# --- _select_orphans: how much deletion is believable ----------------------
 
 
-def test_removes_only_the_orphan():
-    """The real case today: one recipe deleted in Mealie, still in the
-    mirror, so search_recipes offers a slug that get_recipe can't load."""
-    conn = FakeConn(_mirror(20))
+def test_nothing_orphaned_when_all_live():
+    cands, refusal = sync_recipes._select_orphans(_rows(5), {f"id-{i}" for i in range(5)})
+    assert (cands, refusal) == ([], None)
+
+
+def test_finds_the_single_orphan():
+    """The real case: one recipe deleted in Mealie, still in the mirror,
+    so search_recipes offers a slug get_recipe can't load."""
     live = {f"id-{i}" for i in range(20)} - {"id-7"}
-    assert sync_recipes._prune(conn, live) == 1
-    assert conn.deleted == [("id-7", "recipe-7")]
-    assert len(conn.rows) == 19
+    cands, refusal = sync_recipes._select_orphans(_rows(20), live)
+    assert cands == [("id-7", "recipe-7")]
+    assert refusal is None
 
 
-def test_refuses_a_suspiciously_large_prune():
-    """A drain that dies after one page reports ~100 live recipes out of
-    7000. Deleting the difference would destroy the mirror."""
-    conn = FakeConn(_mirror(100))
-    live = {f"id-{i}" for i in range(10)}  # 90% would be deleted
-    assert sync_recipes._prune(conn, live) == 0
-    assert conn.deleted == []
-    assert len(conn.rows) == 100
+def test_refuses_a_suspiciously_large_share():
+    """A drain that dies after one page reports ~100 of 7000 live. Acting
+    on that difference would destroy the index search runs on."""
+    cands, refusal = sync_recipes._select_orphans(_rows(100), {f"id-{i}" for i in range(10)})
+    assert len(cands) == 90
+    assert refusal is not None and "90/100" in refusal
 
 
 def test_force_overrides_the_guard():
-    conn = FakeConn(_mirror(100))
-    live = {f"id-{i}" for i in range(10)}
-    assert sync_recipes._prune(conn, live, force=True) == 90
-    assert len(conn.rows) == 10
+    _, refusal = sync_recipes._select_orphans(
+        _rows(100), {f"id-{i}" for i in range(10)}, force=True
+    )
+    assert refusal is None
 
 
-def test_guard_boundary_allows_a_normal_dedupe():
-    """Phase 1 of #16 deletes 271 of ~7134 rows — about 4%, comfortably
-    under the guard, so a real dedupe won't need --force."""
-    conn = FakeConn(_mirror(7134))
+def test_small_mirrors_are_not_permanently_unprunable():
+    """5 rows with 1 orphan is 20% — over the ratio, but refusing it would
+    mean a small or fresh deployment could never prune at all."""
+    cands, refusal = sync_recipes._select_orphans(_rows(5), {f"id-{i}" for i in range(4)})
+    assert cands == [("id-4", "recipe-4")]
+    assert refusal is None
+
+
+def test_guard_still_applies_once_past_the_floor():
+    live = {f"id-{i}" for i in range(14)}  # 6 orphaned of 20 = 30%
+    cands, refusal = sync_recipes._select_orphans(_rows(20), live)
+    assert len(cands) == 6
+    assert refusal is not None
+
+
+def test_a_real_dedupe_stays_under_the_guard():
+    """#16 Phase 1 removes 271 of ~7134 — about 4%, so the intended use
+    doesn't need --force."""
     live = {f"id-{i}" for i in range(7134)} - {f"id-{i}" for i in range(271)}
-    assert sync_recipes._prune(conn, live) == 271
+    cands, refusal = sync_recipes._select_orphans(_rows(7134), live)
+    assert len(cands) == 271
+    assert refusal is None
 
 
 def test_empty_mirror_is_a_noop():
-    conn = FakeConn([])
-    assert sync_recipes._prune(conn, set()) == 0
+    assert sync_recipes._select_orphans([], set()) == ([], None)
 
 
-@pytest.mark.parametrize("ratio,expected", [(0.5, 40), (0.05, 0)])
-def test_ratio_is_configurable(ratio, expected):
-    conn = FakeConn(_mirror(100))
-    live = {f"id-{i}" for i in range(60)}  # 40% orphaned
-    assert sync_recipes._prune(conn, live, max_delete_ratio=ratio) == expected
+# --- _confirm_gone: absence in the drain is a hypothesis, 404 is proof -----
 
 
-def test_live_ids_walks_every_page():
-    class FakeMealie:
-        def list_recipes(self, page=1, per_page=100, updated_after=None):
-            if page > 3:
-                return {"items": [], "total_pages": 3}
-            start = (page - 1) * 2
-            return {
-                "items": [{"id": f"id-{start}"}, {"id": f"id-{start + 1}"}],
-                "total_pages": 3,
-            }
+class FakeMealie:
+    """404s for ids in ``deleted``; anything else is alive. ``errors``
+    raise a non-404 so we can check those aren't treated as gone."""
 
-    assert sync_recipes._live_recipe_ids(FakeMealie()) == {f"id-{i}" for i in range(6)}
+    def __init__(self, deleted=(), errors=()):
+        self.deleted, self.errors = set(deleted), set(errors)
+        self.asked = []
+
+    def get_recipe(self, rid):
+        self.asked.append(rid)
+        if rid in self.errors:
+            raise httpx.HTTPStatusError(
+                "boom", request=httpx.Request("GET", "http://x"),
+                response=httpx.Response(500),
+            )
+        if rid in self.deleted:
+            raise httpx.HTTPStatusError(
+                "not found", request=httpx.Request("GET", "http://x"),
+                response=httpx.Response(404),
+            )
+        return {"id": rid}
+
+
+def test_only_confirmed_404s_are_deletable():
+    mc = FakeMealie(deleted={"id-1"})
+    gone, survivors = sync_recipes._confirm_gone(mc, [("id-1", "a"), ("id-2", "b")])
+    assert gone == [("id-1", "a")]
+    assert survivors == ["b"]
+
+
+def test_a_row_missed_by_the_drain_is_spared():
+    """The bug this exists for: a concurrent deletion shifts later rows
+    across the cursor, so a live recipe goes unread and looks orphaned.
+    Mealie still has it, so it must survive."""
+    mc = FakeMealie(deleted=set())
+    gone, survivors = sync_recipes._confirm_gone(mc, [("id-9", "missed-by-pagination")])
+    assert gone == []
+    assert survivors == ["missed-by-pagination"]
+
+
+def test_transport_errors_never_count_as_deleted():
+    mc = FakeMealie(errors={"id-3"})
+    gone, survivors = sync_recipes._confirm_gone(mc, [("id-3", "c")])
+    assert gone == []
+    assert survivors == ["c"]
+
+
+def test_connection_errors_never_count_as_deleted():
+    class Flaky:
+        def get_recipe(self, rid):
+            raise httpx.ConnectError("down")
+
+    gone, survivors = sync_recipes._confirm_gone(Flaky(), [("id-4", "d")])
+    assert gone == []
+    assert survivors == ["d"]
+
+
+# --- _live_recipe_ids: a short read must not look like deletions -----------
+
+
+class Pager:
+    def __init__(self, pages, total=None):
+        self.pages, self.total = pages, total
+
+    def list_recipes(self, page=1, per_page=100, updated_after=None):
+        items = self.pages[page - 1] if page <= len(self.pages) else []
+        return {"items": items, "total_pages": len(self.pages), "total": self.total}
+
+
+def test_walks_every_page():
+    pages = [[{"id": f"id-{i}"} for i in range(p * 2, p * 2 + 2)] for p in range(3)]
+    assert sync_recipes._live_recipe_ids(Pager(pages, total=6)) == {f"id-{i}" for i in range(6)}
+
+
+def test_short_read_raises_instead_of_implying_deletions():
+    """Mealie says 500 recipes exist but the walk produced 6. Returning
+    that quietly would mark 494 live recipes as orphans."""
+    pages = [[{"id": f"id-{i}"} for i in range(p * 2, p * 2 + 2)] for p in range(3)]
+    with pytest.raises(RuntimeError, match="6 of 500"):
+        sync_recipes._live_recipe_ids(Pager(pages, total=500))
+
+
+def test_missing_total_is_tolerated():
+    """Older Mealie versions may not report total; don't hard-fail on it."""
+    pages = [[{"id": "id-0"}, {"id": "id-1"}]]
+    assert sync_recipes._live_recipe_ids(Pager(pages, total=None)) == {"id-0", "id-1"}
