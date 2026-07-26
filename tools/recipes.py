@@ -128,7 +128,7 @@ def recipe_tools(user_client: MealieClient) -> list[Any]:
             return "No matches."
         def _fmt(it: dict[str, Any]) -> str:
             r = it.get("rating")
-            star = f" ⭐ {r}/5" if isinstance(r, (int, float)) and r > 0 else ""
+            star = f" ⭐ {r}/5" if isinstance(r, int | float) and r > 0 else ""
             return (
                 f"- **[{it['name']}]({recipe_url(it['slug'])})**{star}  \n"
                 f"  `slug: {it['slug']}`"

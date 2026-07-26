@@ -255,7 +255,7 @@ class MealieClient:
                 if not is_fav:
                     continue
             else:
-                if not (isinstance(rating, (int, float)) and rating >= min_rating):
+                if not (isinstance(rating, int | float) and rating >= min_rating):
                     continue
             picks.append(row)
         picks.sort(

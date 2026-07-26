@@ -69,7 +69,7 @@ def _snippet_for(r: dict) -> str:
     if ings:
         parts.append("ingredients: " + ", ".join(ings))
     rating = r.get("rating")
-    if isinstance(rating, (int, float)) and rating > 0:
+    if isinstance(rating, int | float) and rating > 0:
         # Plain-english descriptor helps embeddings; the numeric column
         # handles structured filters/sorts.
         label = "favorite" if rating >= 4.5 else "highly rated" if rating >= 4 else "rated"
@@ -314,7 +314,7 @@ def main() -> int:
         ratings_by_id: dict[str, float] = {}
         for row in mc.self_ratings():
             rid, val = row.get("recipeId"), row.get("rating")
-            if rid and isinstance(val, (int, float)) and val > 0:
+            if rid and isinstance(val, int | float) and val > 0:
                 ratings_by_id[rid] = float(val)
         log.info("loaded %d user ratings", len(ratings_by_id))
 

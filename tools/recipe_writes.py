@@ -118,7 +118,7 @@ def _reparse(client: MealieClient, merged: list[dict[str, Any]],
         logger.exception("ingredient re-parse failed; keeping plain notes")
         return merged
     out = list(merged)
-    for slot, p in zip(idx, parsed):
+    for slot, p in zip(idx, parsed, strict=False):
         if (structured := _structured_ingredient(p, lines[slot])) is not None:
             out[slot] = structured
     return out

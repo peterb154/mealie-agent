@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't let one interpreter's failure hide the other's result.
+      fail-fast: false
+      matrix:
+        # 3.13 is what the Docker image runs; 3.12 is what local venvs
+        # land on. Testing only one leaves the other free to break.
+        python: ["3.12", "3.13"]
+    name: test (py${{ matrix.python }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: make test
+
+  deps:
+    name: requirements.txt matches uv.lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      # The image installs with pip from requirements.txt while everything
+      # else resolves from uv.lock. If those drift, production runs
+      # versions nothing tested.
+      - name: Regenerate and diff
+        run: |
+          make requirements
+          git diff --exit-code requirements.txt \
+            || { echo "::error::requirements.txt is out of sync with uv.lock — run 'make requirements'"; exit 1; }
+
+  docker:
+    name: image builds and imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t mealie-agent:ci --build-arg GIT_SHA=${{ github.sha }} .
+      # pytest runs from the checkout, so it cannot catch a file missing
+      # from the image. That exact gap crash-looped a deploy once when
+      # mcp_server.py wasn't COPYed. Verified this check actually
+      # discriminates: with that COPY removed the build succeeds and this
+      # step fails with ModuleNotFoundError.
+      #
+      # app.py is compiled rather than imported — it builds a
+      # PgPromptStore at module scope, so importing it needs a database,
+      # and a check that fails without one can't tell a missing file from
+      # a missing DSN.
+      - name: Verify the image is complete
+        run: |
+          docker run --rm --entrypoint python mealie-agent:ci -c "
+          import py_compile, pathlib
+          import mcp_server  # pulls in tools/* and strands_pg/*
+          py_compile.compile('/app/app.py', doraise=True)
+          for d in ('prompts', 'static', 'migrations', 'scripts'):
+              p = pathlib.Path('/app') / d
+              assert p.is_dir() and any(p.iterdir()), f'{d}/ missing or empty in the image'
+          print('image contents OK')
+          "

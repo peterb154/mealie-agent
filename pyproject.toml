@@ -1,0 +1,71 @@
+[project]
+name = "mealie-agent"
+version = "0.1.0"
+description = "Chef Rex — per-user meal-planning agent over the family Mealie library"
+readme = "README.md"
+# 3.13 is what the Docker image runs; 3.12 is what local venvs land on.
+# CI tests both, because the untested one is where breakage hides.
+requires-python = ">=3.12,<3.14"
+
+dependencies = [
+    "strands-agents>=1.13.0",
+    "strands-agents-tools>=0.1",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    "sse-starlette>=2.1",
+    "boto3>=1.35",
+    # <4 pinned on purpose: the MCP identity plumbing (get_http_headers,
+    # proxy header forwarding) leans on fastmcp internals — bump majors
+    # deliberately, not by resolver drift.
+    "fastmcp>=3.2,<4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+# An application, not a library — there's nothing to build or install.
+# app.py and mcp_server.py sit at the repo root and run in place.
+package = false
+
+[tool.ruff]
+# Matches the existing code: only 11 lines in the repo exceed 100 chars.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    # Tool bodies deliberately catch broad exceptions: an agent tool's
+    # return value IS its error channel, and an uncaught exception gives
+    # the model nothing to recover with. Each site logs the traceback via
+    # logger.exception, so nothing is actually swallowed.
+    "BLE001",
+    # `ruff format` owns line width. It already wraps everything it can,
+    # and what's left is long string literals it deliberately won't split
+    # — the Open-Meteo query in tools/weather.py, for one. Keeping E501 on
+    # would just accumulate `# noqa` comments on lines nothing can fix.
+    "E501",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# app.py, mcp_server.py, tools/ and strands_pg/ live at the repo root and
+# are imported by name — the Docker image does the same with
+# PYTHONPATH=/app. Declaring it here means `pytest` works however it's
+# invoked, instead of only under `python -m pytest`.
+pythonpath = ["."]
