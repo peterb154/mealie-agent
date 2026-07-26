@@ -158,8 +158,7 @@ def build_mcp(
             token = lookup(email)
             if token is None:
                 raise PermissionError(
-                    f"no Mealie token provisioned for {email!r} — "
-                    "add a row to mcp_user_tokens"
+                    f"no Mealie token provisioned for {email!r} — add a row to mcp_user_tokens"
                 )
 
         context = verify_mealie_jwt(token)
@@ -174,9 +173,7 @@ def build_mcp(
             client=MealieClient(MEALIE_URL, token),
         )
         identities[email] = (ident, now + _IDENTITY_TTL_SECONDS)
-        logger.info(
-            "MCP identity resolved: %s (household %s)", ident.email, ident.household_id
-        )
+        logger.info("MCP identity resolved: %s (household %s)", ident.email, ident.household_id)
         return ident
 
     class _PerRequestClient:

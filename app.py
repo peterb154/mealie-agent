@@ -120,7 +120,7 @@ app = make_app(
     title="mealie-agent",
     prompt_store=prompts,
     auth_verifier=verify_mealie_jwt,
-    cache_agents=False,          # user JWTs rotate — rebuild per request
+    cache_agents=False,  # user JWTs rotate — rebuild per request
     deploy=True,
     # GIT_SHA is baked in at build time via docker-compose build-arg from the
     # host's git checkout. Falls back to 'dev' outside of a built image.

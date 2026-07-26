@@ -125,9 +125,7 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
             quantity: Numeric quantity (default 1).
         """
         try:
-            item = user_client.add_to_shopping_list(
-                list_id=list_id, note=note, quantity=quantity
-            )
+            item = user_client.add_to_shopping_list(list_id=list_id, note=note, quantity=quantity)
         except Exception as exc:  # noqa: BLE001
             logger.exception("add_to_shopping_list failed")
             return f"(add failed: {exc})"
@@ -219,9 +217,7 @@ def shopping_tools(user_client: MealieClient) -> list[Any]:
                 (post-shopping cleanup). Default false = clear everything.
         """
         try:
-            deleted, failed = user_client.clear_shopping_list(
-                list_id, checked_only=checked_only
-            )
+            deleted, failed = user_client.clear_shopping_list(list_id, checked_only=checked_only)
         except Exception as exc:  # noqa: BLE001
             logger.exception("clear_shopping_list failed")
             return f"(clear failed: {exc})"

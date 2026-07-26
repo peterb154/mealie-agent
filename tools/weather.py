@@ -35,21 +35,57 @@ _CLIENT = httpx.Client(timeout=_TIMEOUT)
 # resolved to Paris, France because nothing in the candidate set matched
 # the literal string "tx".
 _US_STATES: dict[str, str] = {
-    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas",
-    "ca": "california", "co": "colorado", "ct": "connecticut",
-    "de": "delaware", "fl": "florida", "ga": "georgia", "hi": "hawaii",
-    "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa",
-    "ks": "kansas", "ky": "kentucky", "la": "louisiana", "me": "maine",
-    "md": "maryland", "ma": "massachusetts", "mi": "michigan",
-    "mn": "minnesota", "ms": "mississippi", "mo": "missouri",
-    "mt": "montana", "ne": "nebraska", "nv": "nevada",
-    "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico",
-    "ny": "new york", "nc": "north carolina", "nd": "north dakota",
-    "oh": "ohio", "ok": "oklahoma", "or": "oregon", "pa": "pennsylvania",
-    "ri": "rhode island", "sc": "south carolina", "sd": "south dakota",
-    "tn": "tennessee", "tx": "texas", "ut": "utah", "vt": "vermont",
-    "va": "virginia", "wa": "washington", "wv": "west virginia",
-    "wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
+    "al": "alabama",
+    "ak": "alaska",
+    "az": "arizona",
+    "ar": "arkansas",
+    "ca": "california",
+    "co": "colorado",
+    "ct": "connecticut",
+    "de": "delaware",
+    "fl": "florida",
+    "ga": "georgia",
+    "hi": "hawaii",
+    "id": "idaho",
+    "il": "illinois",
+    "in": "indiana",
+    "ia": "iowa",
+    "ks": "kansas",
+    "ky": "kentucky",
+    "la": "louisiana",
+    "me": "maine",
+    "md": "maryland",
+    "ma": "massachusetts",
+    "mi": "michigan",
+    "mn": "minnesota",
+    "ms": "mississippi",
+    "mo": "missouri",
+    "mt": "montana",
+    "ne": "nebraska",
+    "nv": "nevada",
+    "nh": "new hampshire",
+    "nj": "new jersey",
+    "nm": "new mexico",
+    "ny": "new york",
+    "nc": "north carolina",
+    "nd": "north dakota",
+    "oh": "ohio",
+    "ok": "oklahoma",
+    "or": "oregon",
+    "pa": "pennsylvania",
+    "ri": "rhode island",
+    "sc": "south carolina",
+    "sd": "south dakota",
+    "tn": "tennessee",
+    "tx": "texas",
+    "ut": "utah",
+    "vt": "vermont",
+    "va": "virginia",
+    "wa": "washington",
+    "wv": "west virginia",
+    "wi": "wisconsin",
+    "wy": "wyoming",
+    "dc": "district of columbia",
 }
 
 # WMO weather code → short human label. Open-Meteo returns ints; we map
@@ -162,8 +198,10 @@ def get_weather(location: str, days: int = 3) -> str:
     """
     loc = (location or "").strip()
     if not loc:
-        return ("(weather error: no location given — ask the user where "
-                "they are and store it via remember_household)")
+        return (
+            "(weather error: no location given — ask the user where "
+            "they are and store it via remember_household)"
+        )
     days = max(1, min(days, 7))
 
     try:
@@ -172,8 +210,10 @@ def get_weather(location: str, days: int = 3) -> str:
         logger.exception("geocode failed for %r", loc)
         return f"(weather error: geocoding failed: {exc})"
     if not place:
-        return (f"(weather error: couldn't resolve {loc!r} — try just the "
-                "city name, or a different region/country)")
+        return (
+            f"(weather error: couldn't resolve {loc!r} — try just the "
+            "city name, or a different region/country)"
+        )
 
     lat, lon = place["latitude"], place["longitude"]
     pretty = ", ".join(
@@ -207,7 +247,7 @@ def get_weather(location: str, days: int = 3) -> str:
             f"(feels {cur.get('apparent_temperature', '?')}°F), "
             f"{_wmo_label(cur.get('weather_code'))}, "
             f"wind {cur.get('wind_speed_10m', '?')} mph, "
-            f"precip {cur.get('precipitation', 0)}\""
+            f'precip {cur.get("precipitation", 0)}"'
         )
 
     daily = data.get("daily") or {}
@@ -225,7 +265,7 @@ def get_weather(location: str, days: int = 3) -> str:
                 f"{_wmo_label(codes[i] if i < len(codes) else None)}, "
                 f"high {highs[i] if i < len(highs) else '?'}°F / "
                 f"low {lows[i] if i < len(lows) else '?'}°F, "
-                f"precip {precip[i] if i < len(precip) else 0}\" "
+                f'precip {precip[i] if i < len(precip) else 0}" '
                 f"({pop[i] if i < len(pop) else 0}% chance)"
             )
 

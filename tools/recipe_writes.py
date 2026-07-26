@@ -100,8 +100,12 @@ def _structured_ingredient(parsed: dict[str, Any], line: str) -> dict[str, Any] 
     }
 
 
-def _reparse(client: MealieClient, merged: list[dict[str, Any]],
-             existing: list[dict[str, Any]], lines: list[str]) -> list[dict[str, Any]]:
+def _reparse(
+    client: MealieClient,
+    merged: list[dict[str, Any]],
+    existing: list[dict[str, Any]],
+    lines: list[str],
+) -> list[dict[str, Any]]:
     """Try to re-derive food/unit/quantity for the entries we rebuilt.
 
     A rebuilt entry is plain text, which costs Mealie's shopping-list
@@ -307,9 +311,7 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
             if tag_names := _clean(tags):
                 fields["tags"] = user_client.resolve_organizers("tags", tag_names)
             if cat_names := _clean(categories):
-                fields["recipeCategory"] = user_client.resolve_organizers(
-                    "categories", cat_names
-                )
+                fields["recipeCategory"] = user_client.resolve_organizers("categories", cat_names)
             if fields:
                 user_client.patch_recipe(slug, fields)
         except Exception as exc:  # noqa: BLE001
@@ -411,7 +413,9 @@ def recipe_write_tools(user_client: MealieClient) -> list[Any]:
             if key == "recipeIngredient":
                 merged = _reparse(user_client, merged, existing, incoming)
             fields[key] = merged
-            rewritten = sum(1 for i, m in enumerate(merged) if i >= len(existing) or m is not existing[i])
+            rewritten = sum(
+                1 for i, m in enumerate(merged) if i >= len(existing) or m is not existing[i]
+            )
             diff.append(f"- {key}: {len(incoming)} item(s), {rewritten} changed")
 
         # Tags and categories replace wholesale too — tags=[] wipes them.

@@ -27,7 +27,5 @@ def _client() -> Any:
 def embed(text: str, *, dimensions: int = 1024) -> list[float]:
     """Embed a single string. Returns a 1024-d float list."""
     body = json.dumps({"inputText": text, "dimensions": dimensions, "normalize": True})
-    resp = _client().invoke_model(
-        modelId=EMBED_MODEL, body=body, contentType="application/json"
-    )
+    resp = _client().invoke_model(modelId=EMBED_MODEL, body=body, contentType="application/json")
     return json.loads(resp["body"].read())["embedding"]

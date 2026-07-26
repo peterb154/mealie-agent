@@ -29,8 +29,18 @@ import mcp_server
 from strands_pg.api import make_app
 
 USERS = {
-    "tok-brian": {"id": "u-brian", "email": "brian@example.com", "householdId": "h-fam", "groupId": "g-1"},
-    "tok-amy": {"id": "u-amy", "email": "amy@example.com", "householdId": "h-amy", "groupId": "g-1"},
+    "tok-brian": {
+        "id": "u-brian",
+        "email": "brian@example.com",
+        "householdId": "h-fam",
+        "groupId": "g-1",
+    },
+    "tok-amy": {
+        "id": "u-amy",
+        "email": "amy@example.com",
+        "householdId": "h-amy",
+        "groupId": "g-1",
+    },
 }
 TOKENS = {"brian@example.com": "tok-brian", "amy@example.com": "tok-amy"}
 
@@ -62,7 +72,11 @@ def _mock_mealie() -> FastAPI:
     @app.get("/api/households/cookbooks")
     def cookbooks(authorization: str = Header(default="")):
         _token(authorization)
-        return {"items": [{"name": "Family Faves", "slug": "family-faves", "queryFilterString": "tag=fav"}]}
+        return {
+            "items": [
+                {"name": "Family Faves", "slug": "family-faves", "queryFilterString": "tag=fav"}
+            ]
+        }
 
     @app.post("/api/users/{user_id}/ratings/{slug}")
     def set_rating(user_id: str, slug: str, body: dict, authorization: str = Header(default="")):
@@ -99,9 +113,15 @@ class StubMemoryStore:
 
     def list(self, namespace=None, limit=100, offset=0, **kw):
         hits = [
-            SimpleNamespace(id=i, namespace=ns, text=t, metadata={},
-                            distance=0.0, created_at=datetime(2026, 7, 26),
-                            updated_at=datetime(2026, 7, 28) if i in self.edited else None)
+            SimpleNamespace(
+                id=i,
+                namespace=ns,
+                text=t,
+                metadata={},
+                distance=0.0,
+                created_at=datetime(2026, 7, 26),
+                updated_at=datetime(2026, 7, 28) if i in self.edited else None,
+            )
             for i, (ns, t) in sorted(self.rows.items(), reverse=True)
             if ns == namespace
         ]
@@ -219,12 +239,22 @@ def test_tool_listing(urls):
 
 def test_forwarded_identity_uses_that_users_token(urls):
     secret_url, _ = urls
-    _call(secret_url, "mealie_create_shopping_list", {"name": "Amy list"},
-          secret="sekrit", user="Amy@Example.com")  # case-insensitive
+    _call(
+        secret_url,
+        "mealie_create_shopping_list",
+        {"name": "Amy list"},
+        secret="sekrit",
+        user="Amy@Example.com",
+    )  # case-insensitive
     assert calls[-1] == "tok-amy"
 
-    _call(secret_url, "mealie_create_shopping_list", {"name": "Brian list"},
-          secret="sekrit", user="brian@example.com")
+    _call(
+        secret_url,
+        "mealie_create_shopping_list",
+        {"name": "Brian list"},
+        secret="sekrit",
+        user="brian@example.com",
+    )
     assert calls[-1] == "tok-brian"
 
 
@@ -232,23 +262,43 @@ def test_rating_writes_land_under_the_forwarded_users_own_id(urls):
     """Ratings are per-user AND the user id is in the path — a mix-up here
     would write one person's verdict onto another's account."""
     secret_url, _ = urls
-    _call(secret_url, "mealie_rate_recipe", {"slug": "brownies", "rating": 5},
-          secret="sekrit", user="amy@example.com")
+    _call(
+        secret_url,
+        "mealie_rate_recipe",
+        {"slug": "brownies", "rating": 5},
+        secret="sekrit",
+        user="amy@example.com",
+    )
     assert ratings[-1] == ("tok-amy", "u-amy", "brownies", {"rating": 5.0})
 
-    _call(secret_url, "mealie_rate_recipe", {"slug": "brownies", "mark_favorite": True},
-          secret="sekrit", user="brian@example.com")
+    _call(
+        secret_url,
+        "mealie_rate_recipe",
+        {"slug": "brownies", "mark_favorite": True},
+        secret="sekrit",
+        user="brian@example.com",
+    )
     assert ratings[-1] == ("tok-brian", "u-brian", "brownies", {"isFavorite": True})
 
 
 def test_memory_namespaces_follow_identity(urls):
     secret_url, _ = urls
-    _call(secret_url, "mealie_remember_personal", {"text": "hates cilantro"},
-          secret="sekrit", user="amy@example.com")
+    _call(
+        secret_url,
+        "mealie_remember_personal",
+        {"text": "hates cilantro"},
+        secret="sekrit",
+        user="amy@example.com",
+    )
     assert STUB_STORE.added[-1] == ("user:amy@example.com", "hates cilantro")
 
-    _call(secret_url, "mealie_remember_household", {"text": "taco tuesday"},
-          secret="sekrit", user="amy@example.com")
+    _call(
+        secret_url,
+        "mealie_remember_household",
+        {"text": "taco tuesday"},
+        secret="sekrit",
+        user="amy@example.com",
+    )
     assert STUB_STORE.added[-1] == ("household:h-amy", "taco tuesday")
 
 
@@ -258,16 +308,35 @@ def _text(result):
 
 def test_list_notes_is_scoped_and_shows_ids_and_dates(urls):
     secret_url, _ = urls
-    _call(secret_url, "mealie_remember_household", {"text": "we double every pasta recipe"},
-          secret="sekrit", user="brian@example.com")
-    out = _text(_call(secret_url, "mealie_list_notes", {"scope": "household"},
-                      secret="sekrit", user="brian@example.com"))
+    _call(
+        secret_url,
+        "mealie_remember_household",
+        {"text": "we double every pasta recipe"},
+        secret="sekrit",
+        user="brian@example.com",
+    )
+    out = _text(
+        _call(
+            secret_url,
+            "mealie_list_notes",
+            {"scope": "household"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "we double every pasta recipe" in out
     assert "2026-07-26" in out
 
     # Amy's household is different — she must not see it.
-    amy = _text(_call(secret_url, "mealie_list_notes", {"scope": "household"},
-                      secret="sekrit", user="amy@example.com"))
+    amy = _text(
+        _call(
+            secret_url,
+            "mealie_list_notes",
+            {"scope": "household"},
+            secret="sekrit",
+            user="amy@example.com",
+        )
+    )
     assert "pasta" not in amy
 
 
@@ -275,61 +344,121 @@ def test_forget_note_cannot_reach_another_users_notes(urls):
     """Note ids are sequential and printed to every caller, so an
     unscoped delete would let anyone remove anyone's notes by guessing."""
     secret_url, _ = urls
-    saved = _text(_call(secret_url, "mealie_remember_personal", {"text": "brian hates cilantro"},
-                        secret="sekrit", user="brian@example.com"))
+    saved = _text(
+        _call(
+            secret_url,
+            "mealie_remember_personal",
+            {"text": "brian hates cilantro"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     note_id = int(saved.split("[")[1].split("]")[0])
 
     # Amy, with the exact id, in the same scope name.
-    stolen = _text(_call(secret_url, "mealie_forget_note", {"note_id": note_id, "scope": "personal"},
-                         secret="sekrit", user="amy@example.com"))
+    stolen = _text(
+        _call(
+            secret_url,
+            "mealie_forget_note",
+            {"note_id": note_id, "scope": "personal"},
+            secret="sekrit",
+            user="amy@example.com",
+        )
+    )
     assert "not_found" in stolen
     assert STUB_STORE.rows[note_id][1] == "brian hates cilantro"  # still there
 
     # Right scope, wrong owner's scope name — also refused.
-    wrong_scope = _text(_call(secret_url, "mealie_forget_note",
-                              {"note_id": note_id, "scope": "household"},
-                              secret="sekrit", user="brian@example.com"))
+    wrong_scope = _text(
+        _call(
+            secret_url,
+            "mealie_forget_note",
+            {"note_id": note_id, "scope": "household"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "not_found" in wrong_scope
     assert note_id in STUB_STORE.rows
 
     # The owner, in the right scope, succeeds.
-    ok = _text(_call(secret_url, "mealie_forget_note", {"note_id": note_id, "scope": "personal"},
-                     secret="sekrit", user="brian@example.com"))
+    ok = _text(
+        _call(
+            secret_url,
+            "mealie_forget_note",
+            {"note_id": note_id, "scope": "personal"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "deleted" in ok
     assert note_id not in STUB_STORE.rows
 
 
 def test_update_note_rewrites_in_place_and_is_scoped(urls):
     secret_url, _ = urls
-    saved = _text(_call(secret_url, "mealie_remember_household", {"text": "we double pasta"},
-                        secret="sekrit", user="brian@example.com"))
+    saved = _text(
+        _call(
+            secret_url,
+            "mealie_remember_household",
+            {"text": "we double pasta"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     nid = int(saved.split("[")[1].split("]")[0])
 
-    ok = _text(_call(secret_url, "mealie_update_note",
-                     {"note_id": nid, "text": "we double every pasta recipe"},
-                     secret="sekrit", user="brian@example.com"))
+    ok = _text(
+        _call(
+            secret_url,
+            "mealie_update_note",
+            {"note_id": nid, "text": "we double every pasta recipe"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "updated" in ok
     assert STUB_STORE.rows[nid][1] == "we double every pasta recipe"
 
     # Amy's household is different — her update must not land.
-    stolen = _text(_call(secret_url, "mealie_update_note",
-                         {"note_id": nid, "text": "overwritten"},
-                         secret="sekrit", user="amy@example.com"))
+    stolen = _text(
+        _call(
+            secret_url,
+            "mealie_update_note",
+            {"note_id": nid, "text": "overwritten"},
+            secret="sekrit",
+            user="amy@example.com",
+        )
+    )
     assert "not_found" in stolen
     assert STUB_STORE.rows[nid][1] == "we double every pasta recipe"
 
 
 def test_bad_scope_is_rejected(urls):
     secret_url, _ = urls
-    out = _text(_call(secret_url, "mealie_list_notes", {"scope": "everyone"},
-                      secret="sekrit", user="brian@example.com"))
+    out = _text(
+        _call(
+            secret_url,
+            "mealie_list_notes",
+            {"scope": "everyone"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "personal" in out and "household" in out
 
 
 def test_remember_returns_the_new_note_id(urls):
     secret_url, _ = urls
-    out = _text(_call(secret_url, "mealie_remember_personal", {"text": "no bottom-feeder fish"},
-                      secret="sekrit", user="brian@example.com"))
+    out = _text(
+        _call(
+            secret_url,
+            "mealie_remember_personal",
+            {"text": "no bottom-feeder fish"},
+            secret="sekrit",
+            user="brian@example.com",
+        )
+    )
     assert "forget_note(" in out
     assert int(out.split("[")[1].split("]")[0]) in STUB_STORE.rows
 
@@ -342,8 +471,14 @@ def test_secret_mode_requires_identity_header(urls):
 
 def test_unknown_user_is_not_provisioned(urls):
     secret_url, _ = urls
-    _expect_error(secret_url, "mealie_list_cookbooks", {}, "no Mealie token provisioned",
-                  secret="sekrit", user="stranger@example.com")
+    _expect_error(
+        secret_url,
+        "mealie_list_cookbooks",
+        {},
+        "no Mealie token provisioned",
+        secret="sekrit",
+        user="stranger@example.com",
+    )
 
 
 def test_missing_or_wrong_secret_rejects_reads_and_writes(urls):
